@@ -12,6 +12,8 @@ from skimage.restoration import unwrap_phase
 
 from math import sqrt, pow
 
+from monaiUtils.sitkLoader import *
+from monai.transforms import Compose
 
 class AINeedleTracking(ScriptedLoadableModule):
 
@@ -441,9 +443,20 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:                         # Already as magnitude/phase
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
-    # Force 32Float
+    # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
+    
+    data_list = [sitk_img_m, sitk_img_p]
+    load_sitk = Compose([LoadSitkImage()])
+    output = load_sitk(data_list)
+
+    metatensor_1 = output[0][0]
+    metatensor_2 = output[1][0]
+    # print(metatensor_1.data.shape)
+    # print(metatensor_1.data)
+    print(metatensor_1.meta)
+
     # numpy_mask = sitk.GetArrayFromImage(self.sitk_mask)
     # Push debug images to Slicer     
     if debugFlag:
@@ -455,7 +468,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ## Step 1: Inference                ##
     ##                                  ##
     ######################################
-
+    # inference()
     ######################################
     ##                                  ##
     ## Step 2: Get centroid for tip     ##
