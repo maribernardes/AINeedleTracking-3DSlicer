@@ -257,8 +257,6 @@ def inference():
     model.eval()
     
 
-
-
     with torch.no_grad():
         metric_sum = 0.0
         metric_count = 0

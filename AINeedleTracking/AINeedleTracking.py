@@ -443,19 +443,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:                         # Already as magnitude/phase
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
+
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     
-    data_list = [sitk_img_m, sitk_img_p]
-    load_sitk = Compose([LoadSitkImage()])
+    data_list=[]
+    data_list.append({'image_1':sitk_img_m, 'image_2': sitk_img_p})
+    load_sitk = Compose([LoadSitkImaged(keys=['image_1', 'image_2'], image_only=False)])
     output = load_sitk(data_list)
 
-    metatensor_1 = output[0][0]
-    metatensor_2 = output[1][0]
-    # print(metatensor_1.data.shape)
-    # print(metatensor_1.data)
-    print(metatensor_1.meta)
+    metatensor_1 = output[0]['image_1']
+    print(metatensor_1.data[0,0])
 
     # numpy_mask = sitk.GetArrayFromImage(self.sitk_mask)
     # Push debug images to Slicer     
