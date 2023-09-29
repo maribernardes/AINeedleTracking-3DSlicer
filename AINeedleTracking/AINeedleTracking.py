@@ -12,8 +12,15 @@ from skimage.restoration import unwrap_phase
 
 from math import sqrt, pow
 
-from monaiUtils.sitkLoader import *
-from monai.transforms import Compose
+import torch
+from monaiUtils.sitkIO import LoadSitkImaged, PushSitkImaged
+from monai.transforms import Compose, ConcatItemsd, EnsureChannelFirstd, ScaleIntensityd, Orientationd, Spacingd
+from monai.transforms import Invertd, Activationsd, AsDiscreted, RemoveSmallObjectsd
+from monai.networks.nets import UNet 
+from monai.networks.layers import Norm
+from monai.inferers import sliding_window_inference
+from monai.data import decollate_batch
+from monai.handlers.utils import from_engine
 
 class AINeedleTracking(ScriptedLoadableModule):
 
@@ -326,7 +333,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
       self.debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
-      if self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.debugFlag):
+      if self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag):
         print('Tracking successful')
       else:
         print('Tracking failed')
@@ -425,13 +432,63 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   #   return sitk_mask
 
   # Initialize the tracking
-  def initializeTracking(self):
+  def initializeTracking(self, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
     # Initialize sequence counter
     self.count = 0
-    # # Get base mask: Generate bool mask from magnitude image to remove background
-    # self.sitk_mask = self.getMaskFromSegmentation(segmentationNode, firstBaselineVolume)
+    # Setup UNet model
+    print('Setting UNet')
+    path = os.path.dirname(os.path.abspath(__file__))
+    model_file= os.path.join(path, 'Models', 'model_MP_multi.pth')
+    model_unet = UNet(
+      spatial_dims=3, # Mariana: dimensions=3 was deprecated
+      in_channels=in_channels,
+      out_channels=out_channels,
+      channels=[16, 32, 64, 128], 
+      strides=[(1, 2, 2), (1, 2, 2), (1, 1, 1)], 
+      num_res_units=2,
+      norm=Norm.BATCH,
+    )
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    self.model = model_unet.to(device)
+    self.model.load_state_dict(torch.load(model_file, map_location=device))
+    # Setup transforms
+    # Define pre-inference transforms
+    if in_channels==2:
+      pre_array = [
+        # 2-channel input
+        LoadSitkImaged(keys=["image_1", "image_2"]),
+        EnsureChannelFirstd(keys=["image_1", "image_2"]), 
+        ConcatItemsd(keys=["image_1", "image_2"], name="image"),
+      ]        
+    else:
+      pre_array = [
+        # 1-channel input
+        LoadSitkImaged(keys=["image"]),
+        EnsureChannelFirstd(keys=["image"], channel_dim='no_channel'),
+      ]
+    pre_array.append(ScaleIntensityd(keys=["image"], minv=0, maxv=1, channel_wise=True))
+    pre_array.append(Orientationd(keys=["image"], axcodes=orientation))
+    pre_array.append(Spacingd(keys=["image"], pixdim=pixel_dim, mode=("bilinear")))
+    self.pre_transforms = Compose(pre_array)
+    # Define post-inference transforms
+    self.post_transforms = Compose([
+      Invertd(
+        keys="pred",
+        transform=self.pre_transforms,
+        orig_keys="image", 
+        meta_keys="pred_meta_dict", 
+        orig_meta_keys="image_meta_dict",  
+        meta_key_postfix="meta_dict",  
+        nearest_interp=False,
+        to_tensor=True,
+      ),
+      Activationsd(keys="pred", sigmoid=True),
+      AsDiscreted(keys="pred", argmax=True, num_classes=3),
+      RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=False),
+      PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16),
+    ])  
     
-  def getNeedle(self, firstVolume, secondVolume, inputMode, debugFlag=False):
+  def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
     # Using only one slice volumes for now
     # TODO: extend to 3 stacked slices
     print('Logic: getNeedle()')    
@@ -443,20 +500,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:                         # Already as magnitude/phase
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
-
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
-    
-    data_list=[]
-    data_list.append({'image_1':sitk_img_m, 'image_2': sitk_img_p})
-    load_sitk = Compose([LoadSitkImaged(keys=['image_1', 'image_2'], image_only=False)])
-    output = load_sitk(data_list)
-
-    metatensor_1 = output[0]['image_1']
-    print(metatensor_1.data[0,0])
-
-    # numpy_mask = sitk.GetArrayFromImage(self.sitk_mask)
     # Push debug images to Slicer     
     if debugFlag:
       self.pushitkToSlicer(sitk_img_m, 'debug_img_m', debugFlag)
@@ -464,10 +510,35 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
+    ## Step 0: Set input dictionary     ##
+    ##                                  ##
+    ######################################
+    # Set input dictionary
+    if in_channels==2:
+      input_dict = [{'image_1': sitk_img_m, 'image_2': sitk_img_p}]
+    else:
+      input_dict = [{'image':sitk_img_m}]
+
+    ######################################
+    ##                                  ##
     ## Step 1: Inference                ##
     ##                                  ##
     ######################################
-    # inference()
+    # Apply pre_transforms
+    img_input = self.pre_transforms(input_dict)[0]
+    print('Evaluate model')
+    self.model.eval()
+    
+    with torch.no_grad():
+      img_data = img_input["image"].to(torch.device('cpu'))
+      img_input["pred"] = sliding_window_inference(img_data, window_size, 4, self.model)
+      img_output = [self.post_transforms(i) for i in decollate_batch(img_input)]
+      # val_outputs = from_engine(["pred"])(val_data)
+
+    sitk_output = img_output[0]['pred']
+    if debugFlag:
+      self.pushitkToSlicer(sitk_output, 'debug_output', debugFlag)
+
     ######################################
     ##                                  ##
     ## Step 2: Get centroid for tip     ##

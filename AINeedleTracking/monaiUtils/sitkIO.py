@@ -333,7 +333,7 @@ class PushSitkImage(Transform):
         self.write_kwargs = {"verbose": print_log}
         self.writer = sitkWriter(**self.init_kwargs)
         
-    # Not sure this is needed
+    # # Probably not needed
     # def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
     #     if init_kwargs is not None:
     #         self.init_kwargs.update(init_kwargs)
@@ -359,3 +359,50 @@ class PushSitkImage(Transform):
         self.writer.set_data_array(data_array=img, **self.data_kwargs)
         self.writer.set_metadata(meta_dict=meta_data, **self.meta_kwargs)
         return self.writer.write(**self.write_kwargs)
+
+# Dictionary-based wrapper of custom PushSitkImage
+# Basically a copy of SaveImaged with the saver replaced by PushSitkImage and the output being a dict of sitk images
+class PushSitkImaged(MapTransform):
+    def __init__(self,
+        keys: KeysCollection,
+        meta_keys: KeysCollection or None = None,
+        meta_key_postfix: str = DEFAULT_POST_FIX,
+        resample: bool = True,
+        mode: str = "nearest",
+        padding_mode: str = GridSamplePadMode.BORDER,
+        scale: int or None = None,
+        dtype: DtypeLike = np.float64,
+        output_dtype: DtypeLike or None = np.float32,
+        allow_missing_keys: bool = False,
+        squeeze_end_dims: bool = True,
+        print_log: bool = True,
+        ):
+        super().__init__(keys, allow_missing_keys)
+        self.meta_keys = ensure_tuple_rep(meta_keys, len(self.keys))
+        self.meta_key_postfix = ensure_tuple_rep(meta_key_postfix, len(self.keys))
+        self.saver = PushSitkImage(
+            resample=resample,
+            mode=mode,
+            padding_mode=padding_mode,
+            scale=scale,
+            dtype=dtype,
+            output_dtype=output_dtype,
+            squeeze_end_dims=squeeze_end_dims,
+            print_log=print_log,
+        )
+
+    # # Probably not needed
+    # def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
+    #     self.saver.set_options(init_kwargs, data_kwargs, meta_kwargs, write_kwargs)
+    #     return self
+
+    def __call__(self, data):
+        d = dict(data)
+        img = dict()
+        for key, meta_key, meta_key_postfix in self.key_iterator(d, self.meta_keys, self.meta_key_postfix):
+            if meta_key is None and meta_key_postfix is not None:
+                meta_key = f"{key}_{meta_key_postfix}"
+            meta_data = d.get(meta_key) if meta_key is not None else None
+            # Adapt to output the sitk image
+            img[key] = self.saver(img=d[key], meta_data=meta_data)
+        return img
