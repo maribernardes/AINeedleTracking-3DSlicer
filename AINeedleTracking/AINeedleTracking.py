@@ -19,7 +19,7 @@ from monai.transforms import Invertd, Activationsd, AsDiscreted, RemoveSmallObje
 from monai.networks.nets import UNet 
 from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
-from monai.data import decollate_batch
+from monai.data import decollate_batch, CacheDataset, DataLoader
 from monai.handlers.utils import from_engine
 
 class AINeedleTracking(ScriptedLoadableModule):
@@ -351,8 +351,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     print('Logic: __init__')
 
     # Image file writer
-    self.path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'Debug')
+    self.path = os.path.dirname(os.path.abspath(__file__))
+    self.debug_path = os.path.join(self.path,'Debug')
     self.fileWriter = sitk.ImageFileWriter()
+
+    # Check if labelmap node exists, if not, create a new one
+    try:
+        self.needleLabelMapNode = slicer.util.getNode('NeedleLabelMap')
+    except:
+        self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
+        self.needleLabelMapNode.SetName('NeedleLabelMap')
+        print('Created Needle Segmentation Node')
 
     # Check if tracked tip node exists, if not, create a new one
     try:
@@ -371,18 +381,39 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
-          
-  # Create Slicer node and push ITK image to it
-  def pushitkToSlicer(self, sitkImage, name, debugFlag=False):
-    # Check if tracked tip node exists, if not, create a new one
+  
+  def pushitkToSlicerLabelMap(self, sitk_image, name, debugFlag=False):
+    # Get labelmap node
+    labelmap_name = name+'LabelMap'
     try:
-      node = slicer.util.getNode(name)
+      labelmap_node = slicer.util.getNode(labelmap_name)
     except:
-      node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')
-      node.SetName(name)
-    sitkUtils.PushVolumeToSlicer(sitkImage, node)
+      labelmap_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+      labelmap_node.SetName(labelmap_name)
+    # Push labelmap to output volume 
+    volume_node = self.pushitkToSlicerVolume(sitk_image, name+'Output', debugFlag=False)
+    # Copy content to Labelmap volume
+    labelmap_node.Copy(volume_node)
+    labelmap_node.SetName(labelmap_name)
+    # # Get label array
+    # binary_array = sitk.GetArrayFromImage(sitk_image)
+    # slicer.util.updateVolumeFromArray(labelmap_node, binary_array)
     if (debugFlag==True):
-      self.fileWriter.Execute(sitkImage, os.path.join(self.path, name)+'.nrrd', False, 0)
+      self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, labelmap_name)+'_seg.nrrd', False, 0)
+    return labelmap_node
+
+  # Create Slicer node and push ITK image to it
+  def pushitkToSlicerVolume(self, sitk_image, node_name, debugFlag=False):
+    # Check if node exists, if not, create a new one
+    try:
+      volume_node = slicer.util.getNode(node_name)
+    except:
+      volume_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')
+      volume_node.SetName(node_name)
+    sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
+    if (debugFlag==True):
+      self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
+    return volume_node
 
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
@@ -406,15 +437,22 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_magn = self.numpyToitk(numpy_magn, sitk_real)
     sitk_phase = self.numpyToitk(numpy_phase, sitk_real)
     return (sitk_magn, sitk_phase)
-  
-  # # Return blank itk Image with same information from reference volume
-  # def createBlankItk(self, sitkReference, type=None):
-  #   if (type is None):
-  #     image = sitk.Image(sitkReference.GetSize(), sitkReference.GetPixelID())
-  #   else:
-  #     image = sitk.Image(sitkReference.GetSize(), type)  
-  #   image.CopyInformation(sitkReference)
-  #   return image
+
+  # Return blank itk Image with same information from reference volume
+  # Optionals: choose different pixelValue, type (pixel ID)
+  # This is a simplified version from the Util.py method. Does NOT choose from different direction (and center image at the reference volume)
+  def createBlankItk(sitkReference, type=None, pixelValue=0, spacing=None):
+      image = sitk.Image(sitkReference.GetSize(), sitk.sitkUInt8)
+      if (pixelValue != 0):
+          image = pixelValue*sitk.Not(image)
+      if (type is None):
+          image = sitk.Cast(image, sitkReference.GetPixelID())
+      else:
+          image = sitk.Cast(image, type)  
+      image.CopyInformation(sitkReference)
+      if (spacing is not None):
+          image.SetSpacing(spacing)                 # Set spacing
+      return image
 
   # def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
   #   if segmentationNode is None:
@@ -437,8 +475,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.count = 0
     # Setup UNet model
     print('Setting UNet')
-    path = os.path.dirname(os.path.abspath(__file__))
-    model_file= os.path.join(path, 'Models', 'model_MP_multi.pth')
+    model_file= os.path.join(self.path, 'Models', 'model_MP_multi.pth')
     model_unet = UNet(
       spatial_dims=3, # Mariana: dimensions=3 was deprecated
       in_channels=in_channels,
@@ -485,7 +522,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       Activationsd(keys="pred", sigmoid=True),
       AsDiscreted(keys="pred", argmax=True, num_classes=3),
       RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=False),
-      PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16),
+      PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
     ])  
     
   def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
@@ -505,8 +542,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushitkToSlicer(sitk_img_m, 'debug_img_m', debugFlag)
-      self.pushitkToSlicer(sitk_img_p, 'debug_img_p', debugFlag)
+      self.pushitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag)
+      self.pushitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag)
 
     ######################################
     ##                                  ##
@@ -525,19 +562,28 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################
     # Apply pre_transforms
-    img_input = self.pre_transforms(input_dict)[0]
+    # img_input = self.pre_transforms(input_dict)[0]
+
+    val_ds = CacheDataset(data=input_dict, transform=self.pre_transforms, cache_rate=0.0, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=0)
+
+
     print('Evaluate model')
     self.model.eval()
     
+    # img_data = img_input['image'].to(torch.device('cpu'))
     with torch.no_grad():
-      img_data = img_input["image"].to(torch.device('cpu'))
-      img_input["pred"] = sliding_window_inference(img_data, window_size, 4, self.model)
-      img_output = [self.post_transforms(i) for i in decollate_batch(img_input)]
-      # val_outputs = from_engine(["pred"])(val_data)
+      # val_data = self.pre_transforms(input_dict)[0]
+      for i, val_data in enumerate(val_loader):
+        val_inputs = val_data['image'].to(torch.device('cpu'))
+        val_data['pred'] = sliding_window_inference(val_inputs, window_size, 4, self.model)
+        img_output = [self.post_transforms(i) for i in decollate_batch(val_data)]
 
     sitk_output = img_output[0]['pred']
-    if debugFlag:
-      self.pushitkToSlicer(sitk_output, 'debug_output', debugFlag)
+    self.pushitkToSlicerLabelMap(sitk_output,'Needle')
+
+    # if debugFlag:
+    #   self.pushitkToSlicerVolume(sitk_output, 'debug_output', debugFlag)
 
     ######################################
     ##                                  ##
@@ -552,7 +598,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # sitk_blobsVolume[:,:,sliceIndex] = sitk_blobs
     # # Plot
     # if debugFlag:
-    #   self.pushitkToSlicer(sitk_blobsVolume, 'debug_blobs', debugFlag)  
+    #   self.pushitkToSlicerVolume(sitk_blobsVolume, 'debug_blobs', debugFlag)  
           
     # # Label blobs
     # stats = sitk.LabelShapeStatisticsImageFilter()
