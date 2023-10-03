@@ -382,38 +382,34 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
   
-  def pushSitkToSlicerLabelMap(self, sitk_image, labelmap: slicer.vtkMRMLLabelMapVolumeNode or str, debugFlag=False):
-    if isinstance(labelmap, str):
-      labelmap_name = labelmap
-      # Get labelmap node
+  def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode', debugFlag=False):
+    # Provided a name (str)
+    if isinstance(node, str):
+      node_name = node
+      # Check if node exists, if not, create a new one
       try:
-        labelmap_node = slicer.util.getNode(labelmap_name)
+        volume_node = slicer.util.getNode(node_name)
+        volume_type = volume_node.GetClassName()
+        if (volume_type != 'vtkMRMLScalarVolumeNode') and (volume_type != 'vtkMRMLLabelMapVolumeNode'):
+          print('Error: node already exists and is not slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode')
+          return False
       except:
-        labelmap_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-        labelmap_node.SetName(labelmap_name)
-    elif isinstance(labelmap, slicer.vtkMRMLLabelMapVolumeNode):
-      labelmap_name = labelmap.GetName()
-      labelmap_node = labelmap
+        volume_type = type
+        volume_node = slicer.mrmlScene.AddNewNodeByClass(volume_type)
+        volume_node.SetName(node_name)
+    elif isinstance(node, slicer.vtkMRMLScalarVolumeNode) or isinstance(node, slicer.vtkMRMLLabelMapVolumeNode):
+      node_name = node.GetName()
+      volume_node = node
+      volume_type = volume_node.GetClassName()
     else:
-      print('Error: variable labelmap is not valid (slicer.vtkMRMLLabelMapVolumeNode or str)')
+      print('Error: variable labelmap is not valid (slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str)')
       return False
-    # Push sitk image to labelmap volume 
-    sitkUtils.PushVolumeToSlicer(sitk_image, labelmap_node)
-    if (debugFlag==True):
-      self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, labelmap_name)+'_seg.nrrd', False, 0)
-    return True
-
-  # Create Slicer node and push ITK image to it
-  def pushSitkToSlicerScalarVolume(self, sitk_image, node_name, debugFlag=False):
-    # Check if node exists, if not, create a new one
-    try:
-      volume_node = slicer.util.getNode(node_name)
-    except:
-      volume_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLScalarVolumeNode')
-      volume_node.SetName(node_name)
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
     if (debugFlag==True):
-      self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
+      if volume_type=='vtkMRMLLabelMapVolumeNode':
+        self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'_seg.nrrd', False, 0)
+      else:
+        self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
     return True
 
   # Return sitk Image from numpy array
@@ -543,8 +539,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushSitkToSlicerScalarVolume(sitk_img_m, 'debug_img_m', debugFlag)
-      self.pushSitkToSlicerScalarVolume(sitk_img_p, 'debug_img_p', debugFlag)
+      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag)
+      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag)
 
     ######################################
     ##                                  ##
@@ -575,7 +571,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         data['pred'] = decollate_batch(val_outputs)[0]
         sitk_output = self.post_transforms(data)['pred']
 
-    self.pushSitkToSlicerLabelMap(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
+    # Push segmentation to Slicer
+    self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
 
     ######################################
     ##                                  ##
