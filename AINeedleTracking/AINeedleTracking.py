@@ -382,19 +382,26 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
   
-  def pushSitkToSlicerLabelMap(self, sitk_image, name, debugFlag=False):
-    # Get labelmap node
-    labelmap_name = name+'LabelMap'
-    try:
-      labelmap_node = slicer.util.getNode(labelmap_name)
-    except:
-      labelmap_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-      labelmap_node.SetName(labelmap_name)
+  def pushSitkToSlicerLabelMap(self, sitk_image, labelmap: slicer.vtkMRMLLabelMapVolumeNode or str, debugFlag=False):
+    if isinstance(labelmap, str):
+      labelmap_name = labelmap
+      # Get labelmap node
+      try:
+        labelmap_node = slicer.util.getNode(labelmap_name)
+      except:
+        labelmap_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+        labelmap_node.SetName(labelmap_name)
+    elif isinstance(labelmap, slicer.vtkMRMLLabelMapVolumeNode):
+      labelmap_name = labelmap.GetName()
+      labelmap_node = labelmap
+    else:
+      print('Error: variable labelmap is not valid (slicer.vtkMRMLLabelMapVolumeNode or str)')
+      return False
     # Push sitk image to labelmap volume 
     sitkUtils.PushVolumeToSlicer(sitk_image, labelmap_node)
     if (debugFlag==True):
       self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, labelmap_name)+'_seg.nrrd', False, 0)
-    return labelmap_node
+    return True
 
   # Create Slicer node and push ITK image to it
   def pushSitkToSlicerScalarVolume(self, sitk_image, node_name, debugFlag=False):
@@ -407,7 +414,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
     if (debugFlag==True):
       self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
-    return volume_node
+    return True
 
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
@@ -568,7 +575,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         data['pred'] = decollate_batch(val_outputs)[0]
         sitk_output = self.post_transforms(data)['pred']
 
-    self.pushSitkToSlicerLabelMap(sitk_output,'Needle', debugFlag=debugFlag)
+    self.pushSitkToSlicerLabelMap(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
 
     ######################################
     ##                                  ##
