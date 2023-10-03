@@ -561,25 +561,19 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ## Step 1: Inference                ##
     ##                                  ##
     ######################################
+
     # Apply pre_transforms
-    # img_input = self.pre_transforms(input_dict)[0]
+    data = self.pre_transforms(input_dict)[0]
 
-    val_ds = CacheDataset(data=input_dict, transform=self.pre_transforms, cache_rate=0.0, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=0)
-
-
-    print('Evaluate model')
+    # Evaluate model
     self.model.eval()
-    
-    # img_data = img_input['image'].to(torch.device('cpu'))
     with torch.no_grad():
-      # val_data = self.pre_transforms(input_dict)[0]
-      for i, val_data in enumerate(val_loader):
-        val_inputs = val_data['image'].to(torch.device('cpu'))
-        val_data['pred'] = sliding_window_inference(val_inputs, window_size, 4, self.model)
-        img_output = [self.post_transforms(i) for i in decollate_batch(val_data)]
+        batch_input = data['image'].unsqueeze(0)
+        val_inputs = batch_input.to(torch.device('cpu'))
+        val_outputs = sliding_window_inference(val_inputs, window_size, 4, self.model)
+        data['pred'] = decollate_batch(val_outputs)[0]
+        sitk_output = self.post_transforms(data)['pred']
 
-    sitk_output = img_output[0]['pred']
     self.pushitkToSlicerLabelMap(sitk_output,'Needle')
 
     # if debugFlag:
