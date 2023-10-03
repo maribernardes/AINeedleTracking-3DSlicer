@@ -19,7 +19,7 @@ from monai.transforms import Invertd, Activationsd, AsDiscreted, RemoveSmallObje
 from monai.networks.nets import UNet 
 from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
-from monai.data import decollate_batch, CacheDataset, DataLoader
+from monai.data import decollate_batch
 from monai.handlers.utils import from_engine
 
 class AINeedleTracking(ScriptedLoadableModule):
