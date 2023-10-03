@@ -382,7 +382,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
   
-  def pushitkToSlicerLabelMap(self, sitk_image, name, debugFlag=False):
+  def pushSitkToSlicerLabelMap(self, sitk_image, name, debugFlag=False):
     # Get labelmap node
     labelmap_name = name+'LabelMap'
     try:
@@ -390,20 +390,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     except:
       labelmap_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
       labelmap_node.SetName(labelmap_name)
-    # Push labelmap to output volume 
-    volume_node = self.pushitkToSlicerVolume(sitk_image, name+'Output', debugFlag=False)
-    # Copy content to Labelmap volume
-    labelmap_node.Copy(volume_node)
-    labelmap_node.SetName(labelmap_name)
-    # # Get label array
-    # binary_array = sitk.GetArrayFromImage(sitk_image)
-    # slicer.util.updateVolumeFromArray(labelmap_node, binary_array)
+    # Push sitk image to labelmap volume 
+    sitkUtils.PushVolumeToSlicer(sitk_image, labelmap_node)
     if (debugFlag==True):
       self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, labelmap_name)+'_seg.nrrd', False, 0)
     return labelmap_node
 
   # Create Slicer node and push ITK image to it
-  def pushitkToSlicerVolume(self, sitk_image, node_name, debugFlag=False):
+  def pushSitkToSlicerScalarVolume(self, sitk_image, node_name, debugFlag=False):
     # Check if node exists, if not, create a new one
     try:
       volume_node = slicer.util.getNode(node_name)
@@ -542,8 +536,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag)
-      self.pushitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag)
+      self.pushSitkToSlicerScalarVolume(sitk_img_m, 'debug_img_m', debugFlag)
+      self.pushSitkToSlicerScalarVolume(sitk_img_p, 'debug_img_p', debugFlag)
 
     ######################################
     ##                                  ##
@@ -574,10 +568,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         data['pred'] = decollate_batch(val_outputs)[0]
         sitk_output = self.post_transforms(data)['pred']
 
-    self.pushitkToSlicerLabelMap(sitk_output,'Needle')
-
-    # if debugFlag:
-    #   self.pushitkToSlicerVolume(sitk_output, 'debug_output', debugFlag)
+    self.pushSitkToSlicerLabelMap(sitk_output,'Needle', debugFlag=debugFlag)
 
     ######################################
     ##                                  ##
