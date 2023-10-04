@@ -364,6 +364,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode.SetName('NeedleLabelMap')
         print('Created Needle Segmentation Node')
 
+    # Check if text node exists, if not, create a new one
+    try:
+        self.needleConfidenceNode = slicer.util.getNode('CurrentTipConfidence')
+    except:
+        self.needleConfidenceNode = slicer.vtkMRMLTextNode()
+        slicer.mrmlScene.AddNode(self.needleConfidenceNode)
+        self.needleConfidenceNode.SetName('CurrentTipConfidence')
+        print('Created Needle Confidence Node')
+
     # Check if tracked tip node exists, if not, create a new one
     try:
         self.tipTrackedNode = slicer.util.getNode('CurrentTrackedTipTransform')
@@ -411,6 +420,19 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       else:
         self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
     return True
+
+  # Given a binary skeleton image (single pixel-wide), find the pixel coordinates of extremity points
+  def getExtremityPoints(self, sitk_line):
+    # Get the coordinates of all non-zero pixels in the binary image
+    nonzero_coords = np.argwhere(sitk.GetArrayFromImage(sitk_line) == 1)
+    # Calculate the distance of each non-zero pixel to all others
+    distances = np.linalg.norm(nonzero_coords[:, None, :] - nonzero_coords[None, :, :], axis=-1)
+    # Find the two points with the maximum distance; these are the extremity points
+    extremity_indices = np.unravel_index(np.argmax(distances), distances.shape)
+    extremity_coords_numpy = [nonzero_coords[index] for index in extremity_indices]
+    extremity_coords_sitk = [coord[::-1] for coord in extremity_coords_numpy]
+    # TODO: Convert from pixel do physical coordinates
+    return extremity_coords_sitk
 
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
@@ -539,8 +561,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag)
-      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag)
+      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag=debugFlag)
+      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag=debugFlag)
 
     ######################################
     ##                                  ##
@@ -574,42 +596,112 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
 
+    # Separate labels
+    sitk_tip = (sitk_output==2)
+    sitk_shaft = (sitk_output==1)
+
+    # Plot
+    if debugFlag:
+      self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip', debugFlag=debugFlag)  
+      self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)  
+
     ######################################
     ##                                  ##
     ## Step 2: Get centroid for tip     ##
     ##                                  ##
     ######################################
 
-    # # Threshold roi to create blobs
-    # sitk_blobs = (sitk_phaseGradient > blobThreshold)
-    # # Put slice in the volume
-    # sitk_blobsVolume = self.createBlankItk(sitk_roi, sitk_blobs.GetPixelID())
-    # sitk_blobsVolume[:,:,sliceIndex] = sitk_blobs
+    center = None
+    shaft_tip = None
+    # There is a pixel present in tip segmentation
+    if sitk.GetArrayFromImage(sitk_tip).sum() > 0:
+      # Get blobs from segmentation
+      stats = sitk.LabelShapeStatisticsImageFilter()
+      stats.Execute(sitk.ConnectedComponent(sitk_tip))
+      # Get blobs sizes and centroid physical coordinates
+      labels_size = []
+      labels_centroid = []
+      for l in stats.GetLabels():
+        if debugFlag:
+          print('Label %s: -> Size: %s, Center: %s, Flatness: %s, Elongation: %s' %(l, stats.GetNumberOfPixels(l), stats.GetCentroid(l), stats.GetFlatness(l), stats.GetElongation(l)))
+        labels_size.append(stats.GetNumberOfPixels(l))
+        labels_centroid.append(stats.GetCentroid(l))    
+      # Get tip estimate position
+      index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
+      center = labels_centroid[index_largest]             # Get the largest centroid center
+      if debugFlag:
+        print('Chosen label: %i' %(index_largest+1))
+    # # Try to get estimate from shaft segmentation instead
+    # if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
+    #   self.needleConfidenceNode.SetText('Medium')           # Set estimate as medium (centroid was detected from shaft segmentation)
+    #   sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
+    #   extremity = self.getExtremityPoints(sitk_skeleton)
+    #   # Find extremity closer to image top (smaller y coordinate) 
+    #   if extremity[0][1] <= extremity[1][1]:
+    #     shaft_tip = extremity[0]
+    #   else:
+    #     shaft_tip = extremity[1]
+    #   if debugFlag:
+    #     self.pushSitkToSlicerVolume(sitk_skeleton, 'debug_skeleton', debugFlag=debugFlag)  
+    # # Define confidence on tip estimate
+    # if center is None:
+    #   center = shaft_tip                            # Use shaft tip (no tip segmentation)
+    #   self.needleConfidenceNode.SetText('Low')      # Set estimate as low (no tip segmentation, just shaft)
+    # elif shaft_tip is None:
+    #   self.needleConfidenceNode.SetText('Medium')   # Set estimate as medium (use tip, no shaft segmentation available)
+    # else:
+    #   print(center)
+    #   print(shaft_tip)
+    #   distance = np.linalg.norm(center, shaft_tip)  # Calculate distance between tip and shaft
+    #   if distance < 15:                             # TODO: Define threshold dynamically based on tip centroid size
+    #     self.needleConfidenceNode.SetText('High')   # Set estimate as high (both tip and shaft segmentation and they are close)
+    #   else:
+    #     self.needleConfidenceNode.SetText('Medium') # Set estimate as medium (use tip segmentation, but shaft is not close)
+    if center is None:
+      self.needleConfidenceNode.SetText('None')
+      print('Center coordinates: None')
+      print('Confidence: ' + self.needleConfidenceNode.GetText())
+      return False
+    
+
+    ####################################
+    ##                                ##
+    ## Step 3: Push to tipTrackedNode ##
+    ##                                ##
+    ####################################
+
+    # Convert to 3D Slicer coordinates (RAS)
+    centerRAS = (-center[0], -center[1], center[2])     
     # # Plot
-    # if debugFlag:
-    #   self.pushitkToSlicerVolume(sitk_blobsVolume, 'debug_blobs', debugFlag)  
-          
-    # # Label blobs
-    # stats = sitk.LabelShapeStatisticsImageFilter()
-    # stats.Execute(sitk.ConnectedComponent(sitk_blobsVolume))
+    if debugFlag:
+      print('Center coordinates: ' + str(centerRAS))
+      print('Confidence: ' + self.needleConfidenceNode.GetText())
 
-    # # Get blobs sizes and centroid physical coordinates
-    # labels_size = []
-    # labels_centroid = []
-    # labels_depth = []
-    # for l in stats.GetLabels():
-    #     if debugFlag:
-    #         print('Label %s: -> Size: %s, Center: %s, Flatness: %s, Elongation: %s' %(l, stats.GetNumberOfPixels(l), stats.GetCentroid(l), stats.GetFlatness(l), stats.GetElongation(l)))
-    #     if (stats.GetElongation(l) < 4): 
-    #         labels_size.append(stats.GetNumberOfPixels(l))
-    #         labels_centroid.append(stats.GetCentroid(l))    
-    #         labels_depth.append(stats.GetCentroid(l)[2])
+    # # Push coordinates to tip Node
+    # transformMatrix = vtk.vtkMatrix4x4()
+    # transformMatrix.SetElement(0,3, centerRAS[0])
+    # transformMatrix.SetElement(1,3, centerRAS[1])
+    # transformMatrix.SetElement(2,3, centerRAS[2])
+    # self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
 
-    # ####################################
-    # ##                                ##
-    # ## Step 6: Get tip physical point ##
-    # ##                                ##
-    # ####################################
+    return True
+  
+
+
+
+    # # Calculate prediction error
+    # predError = sqrt(pow((tipRAS[0]-centerRAS[0]),2)+pow((tipRAS[1]-centerRAS[1]),2)+pow((tipRAS[2]-centerRAS[2]),2))
+    # # Check error threshold
+    # if(predError>errorThreshold):
+    #   print('Tip too far from prediction')
+    #   return False
+    
+    # # Push coordinates to tip Node
+    # transformMatrix.SetElement(0,3, centerRAS[0])
+    # transformMatrix.SetElement(1,3, centerRAS[1])
+    # transformMatrix.SetElement(2,3, centerRAS[2])
+    # self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
+
     # # Check number of centroids found
     # if len(labels_size)>15:
     #   print('Too many centroids, probably noise')
@@ -629,17 +721,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     #   print('Centroid too big, probably noise')
     #   return False
     
-    # # # Get significantly bigger centroid
-    # # if (labels_size[first_largest] > 3.5*labels_size[second_largest]):
-    # #   label_index = first_largest
-    # # else: # Get centroid further inserted
-    # #   label_index = labels_depth.index(max(labels_depth))
 
-    # # Get selected centroid center
-    # # center = labels_centroid[label_index]
-    # center = labels_centroid[first_largest]
-    # # Convert to 3D Slicer coordinates (RAS)
-    # centerRAS = (-center[0], -center[1], center[2])
 
     # # Plot
     # if debugFlag:
@@ -654,10 +736,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     #   print('Tip too far from prediction')
     #   return False
     
-    # # Push coordinates to tip Node
-    # transformMatrix.SetElement(0,3, centerRAS[0])
-    # transformMatrix.SetElement(1,3, centerRAS[1])
-    # transformMatrix.SetElement(2,3, centerRAS[2])
-    # self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
 
-    return True
+
+    # return True
