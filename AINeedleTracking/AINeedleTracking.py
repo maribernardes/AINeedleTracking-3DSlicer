@@ -362,6 +362,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
         slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         self.needleLabelMapNode.SetName('NeedleLabelMap')
+        colorTableNode = self.createColorTable()
+        self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
         print('Created Needle Segmentation Node')
 
     # Check if text node exists, if not, create a new one
@@ -382,14 +384,27 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipTrackedNode.SetName('CurrentTrackedTipTransform')
         print('Created Tracked Tip TransformNode')
 
-    # Base ITK images
-    # self.sitk_mask = None
+    # Used for saving data from experiments
     self.count = None
     
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
+  
+  def createColorTable(self):
+    label_list = [('tip', 1, (1.0, 1.0, 0.0, 1.0)), ("shaft", 2, (1.0, 1.0, 0.0, 1.0))]
+    colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
+    colorTableNode.SetTypeToUser()
+    colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
+    slicer.mrmlScene.AddNode(colorTableNode); 
+    colorTableNode.UnRegister(None)
+    largestLabelValue = max([name_value[1] for name_value in label_list])
+    colorTableNode.SetNumberOfColors(largestLabelValue + 1)
+    colorTableNode.SetNamesInitialised(True) # prevent automatic color name generation
+    for labelName, labelValue, labelColor in label_list:
+        colorTableNode.SetColor(labelValue, labelName, labelColor)
+    return colorTableNode
   
   def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode', debugFlag=False):
     # Provided a name (str)
@@ -421,18 +436,30 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
     return True
 
-  # Given a binary skeleton image (single pixel-wide), find the pixel coordinates of extremity points
-  def getExtremityPoints(self, sitk_line):
+  # Given a binary skeleton image (single pixel-wide), find the physical coordinates of extremity closer to the image center
+  def getShaftTipCoordinates(self, sitk_line):
     # Get the coordinates of all non-zero pixels in the binary image
     nonzero_coords = np.argwhere(sitk.GetArrayFromImage(sitk_line) == 1)
     # Calculate the distance of each non-zero pixel to all others
     distances = np.linalg.norm(nonzero_coords[:, None, :] - nonzero_coords[None, :, :], axis=-1)
     # Find the two points with the maximum distance; these are the extremity points
     extremity_indices = np.unravel_index(np.argmax(distances), distances.shape)
-    extremity_coords_numpy = [nonzero_coords[index] for index in extremity_indices]
-    extremity_coords_sitk = [coord[::-1] for coord in extremity_coords_numpy]
-    # TODO: Convert from pixel do physical coordinates
-    return extremity_coords_sitk
+    extremitys_numpy = [nonzero_coords[index] for index in extremity_indices]
+    # Conver to sitk array order
+    extremity1 = (int(extremitys_numpy[0][2]), int(extremitys_numpy[0][1]), int(extremitys_numpy[0][0]))
+    extremity2 = (int(extremitys_numpy[1][2]), int(extremitys_numpy[1][1]), int(extremitys_numpy[1][0]))
+    # extremitys_sitk = [coord[::-1] for coord in extremitys_numpy]
+    # Calculate the center coordinates of the image volume
+    image_shape = sitk_line.GetSize()
+    center_coordinates = np.array(image_shape) / 2.0
+    # Calculate the distances from each extremity point to the center
+    distance1 = np.linalg.norm(np.array(extremity1) - center_coordinates)
+    distance2 = np.linalg.norm(np.array(extremity2) - center_coordinates)
+    # Determine which extremity is closer to the center and return physical coordinates
+    if distance1 < distance2:
+        return sitk_line.TransformIndexToPhysicalPoint(extremity1)
+    else:
+        return sitk_line.TransformIndexToPhysicalPoint(extremity2)
 
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
@@ -613,57 +640,58 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     center = None
     shaft_tip = None
-    # There is a pixel present in tip segmentation
+    # Try to get tip estimate from tip segmentation
     if sitk.GetArrayFromImage(sitk_tip).sum() > 0:
       # Get blobs from segmentation
       stats = sitk.LabelShapeStatisticsImageFilter()
+      stats.SetComputeFeretDiameter(True)
       stats.Execute(sitk.ConnectedComponent(sitk_tip))
       # Get blobs sizes and centroid physical coordinates
       labels_size = []
       labels_centroid = []
+      labels_max_radius = []
       for l in stats.GetLabels():
+        number_pixels = stats.GetNumberOfPixels(l)
+        centroid = stats.GetCentroid(l)
+        max_radius = stats.GetFeretDiameter(l)
         if debugFlag:
-          print('Label %s: -> Size: %s, Center: %s, Flatness: %s, Elongation: %s' %(l, stats.GetNumberOfPixels(l), stats.GetCentroid(l), stats.GetFlatness(l), stats.GetElongation(l)))
-        labels_size.append(stats.GetNumberOfPixels(l))
-        labels_centroid.append(stats.GetCentroid(l))    
+          print('Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
+        labels_size.append(number_pixels)
+        labels_centroid.append(centroid)    
+        labels_max_radius.append(max_radius)
       # Get tip estimate position
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
       center = labels_centroid[index_largest]             # Get the largest centroid center
+      max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
       if debugFlag:
         print('Chosen label: %i' %(index_largest+1))
-    # # Try to get estimate from shaft segmentation instead
-    # if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
-    #   self.needleConfidenceNode.SetText('Medium')           # Set estimate as medium (centroid was detected from shaft segmentation)
-    #   sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
-    #   extremity = self.getExtremityPoints(sitk_skeleton)
-    #   # Find extremity closer to image top (smaller y coordinate) 
-    #   if extremity[0][1] <= extremity[1][1]:
-    #     shaft_tip = extremity[0]
-    #   else:
-    #     shaft_tip = extremity[1]
-    #   if debugFlag:
-    #     self.pushSitkToSlicerVolume(sitk_skeleton, 'debug_skeleton', debugFlag=debugFlag)  
-    # # Define confidence on tip estimate
-    # if center is None:
-    #   center = shaft_tip                            # Use shaft tip (no tip segmentation)
-    #   self.needleConfidenceNode.SetText('Low')      # Set estimate as low (no tip segmentation, just shaft)
-    # elif shaft_tip is None:
-    #   self.needleConfidenceNode.SetText('Medium')   # Set estimate as medium (use tip, no shaft segmentation available)
-    # else:
-    #   print(center)
-    #   print(shaft_tip)
-    #   distance = np.linalg.norm(center, shaft_tip)  # Calculate distance between tip and shaft
-    #   if distance < 15:                             # TODO: Define threshold dynamically based on tip centroid size
-    #     self.needleConfidenceNode.SetText('High')   # Set estimate as high (both tip and shaft segmentation and they are close)
-    #   else:
-    #     self.needleConfidenceNode.SetText('Medium') # Set estimate as medium (use tip segmentation, but shaft is not close)
+    # Try to get tip estimate from shaft segmentation
+    if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
+      sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
+      shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+      if debugFlag:
+        self.pushSitkToSlicerVolume(sitk_skeleton, 'debug_skeleton', debugFlag=debugFlag)  
+    # Define confidence on tip estimate
+    if center is None:
+      center = shaft_tip                            # Use shaft tip (no tip segmentation)
+      self.needleConfidenceNode.SetText('Low')      # Set estimate as low (no tip segmentation, just shaft)
+    elif shaft_tip is None:
+      self.needleConfidenceNode.SetText('Medium')   # Set estimate as medium (use tip, no shaft segmentation available)
+    else:
+      distance = np.linalg.norm(np.array(center) - np.array(shaft_tip))  # Calculate distance between tip and shaft
+      print('Distance = ' + str(distance))
+      print(center)
+      print(shaft_tip)
+      if distance <= max_distance:                             
+        self.needleConfidenceNode.SetText('High')   # Set estimate as high (both tip and shaft segmentation and they are close)
+      else:
+        self.needleConfidenceNode.SetText('Medium') # Set estimate as medium (use tip segmentation, but shaft is not close)
     if center is None:
       self.needleConfidenceNode.SetText('None')
       print('Center coordinates: None')
       print('Confidence: ' + self.needleConfidenceNode.GetText())
       return False
     
-
     ####################################
     ##                                ##
     ## Step 3: Push to tipTrackedNode ##
