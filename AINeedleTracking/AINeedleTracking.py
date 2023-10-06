@@ -174,6 +174,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
     advancedFormLayout.addRow('Debug', self.debugFlagCheckBox)
 
+    # UpdateScanPlan mode check box (output images at intermediate steps)
+    self.updateScanPlaneCheckBox = qt.QCheckBox()
+    self.updateScanPlaneCheckBox.checked = False
+    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
+    advancedFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
+
     self.layout.addStretch(1)
     
     ####################################
@@ -194,6 +200,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     
     # Connect UI buttons to event calls
     self.startTrackingButton.connect('clicked(bool)', self.startTracking)
@@ -208,6 +215,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolume = None
     self.inputMode = None
     self.debugFlag = None
+    self.updateScanPlane = None
 
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
@@ -280,6 +288,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeMagPhase.checked = (self._parameterNode.GetParameter('InputMode') == 'MagPhase')
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
+    self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
     
     # Update buttons states
     self.updateButtons()
@@ -298,6 +307,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('SecondVolume', self.secondVolumeSelector.currentNodeID)
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('UpdateScanPlane', 'True' if self.updateScanPlaneCheckBox.checked else 'False')
     self._parameterNode.EndModify(wasModified)
                         
   # Update button states
@@ -328,15 +338,19 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   def receivedImage(self, caller=None, event=None):
     # Execute one tracking cycle
     if self.isTrackingOn:
-      print('UI: receivedImage()')
       # Get parameters
       self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
       self.debugFlag = self.debugFlagCheckBox.checked
+      self.updateScanPlane = self.updateScanPlaneCheckBox.checked
       # Get needle tip
-      if self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag):
-        print('Tracking successful')
-      else:
+      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag) 
+      if confidence is None:
         print('Tracking failed')
+      elif self.updateScanPlane is True:
+        self.logic.updateScanPlane()
+        print('Tracked with %s confidence: PLAN_0 updated' %confidence)
+      else:
+        print('Tracked with %s confidence' %confidence)
       
     
 ################################################################################################################################################
@@ -348,12 +362,27 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)
     self.cliParamNode = None
-    print('Logic: __init__')
 
     # Image file writer
     self.path = os.path.dirname(os.path.abspath(__file__))
     self.debug_path = os.path.join(self.path,'Debug')
     self.fileWriter = sitk.ImageFileWriter()
+
+    # Used for saving data from experiments
+    self.count = None
+
+    # Setup UNet
+    self.setupUNet()
+
+    # Check if PLANE_0 node exists, if not, create a new one
+    try:
+        self.scanPlaneTransformNode = slicer.util.getNode('PLANE_0')
+        self.initializeScanPlane(plane='COR')
+    except:
+      self.scanPlaneTransformNode = slicer.vtkMRMLLinearTransformNode()
+      slicer.mrmlScene.AddNode(self.scanPlaneTransformNode)
+      self.scanPlaneTransformNode.SetName('PLANE_0')
+      self.initializeScanPlane(plane='COR')
 
     # Check if labelmap node exists, if not, create a new one
     try:
@@ -364,7 +393,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode.SetName('NeedleLabelMap')
         colorTableNode = self.createColorTable()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
-        print('Created Needle Segmentation Node')
+        # print('Created Needle Segmentation Node')
 
     # Check if text node exists, if not, create a new one
     try:
@@ -373,7 +402,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleConfidenceNode = slicer.vtkMRMLTextNode()
         slicer.mrmlScene.AddNode(self.needleConfidenceNode)
         self.needleConfidenceNode.SetName('CurrentTipConfidence')
-        print('Created Needle Confidence Node')
+        # print('Created Needle Confidence Node')
 
     # Check if tracked tip node exists, if not, create a new one
     try:
@@ -382,16 +411,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipTrackedNode = slicer.vtkMRMLLinearTransformNode()
         slicer.mrmlScene.AddNode(self.tipTrackedNode)
         self.tipTrackedNode.SetName('CurrentTrackedTipTransform')
-        print('Created Tracked Tip TransformNode')
+        # print('Created Tracked Tip TransformNode')
 
-    # Used for saving data from experiments
-    self.count = None
+
     
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
         parameterNode.SetParameter('Debug', 'False')   
   
+  # Create a ColorTable for the LabelMapNode
+  # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
   def createColorTable(self):
     label_list = [('tip', 1, (1.0, 1.0, 0.0, 1.0)), ("shaft", 2, (1.0, 1.0, 0.0, 1.0))]
     colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
@@ -406,6 +436,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         colorTableNode.SetColor(labelValue, labelName, labelColor)
     return colorTableNode
   
+  def saveSitkImage(self, sitk_image, name, path, is_label=False):
+    if is_label is True:
+      self.fileWriter.Execute(sitk_image, os.path.join(path, name)+'_seg.nrrd', False, 0)
+    else:
+      self.fileWriter.Execute(sitk_image, os.path.join(path, name)+'.nrrd', False, 0)
+  
+  # Push an sitk image to a given volume node in Slicer
+  # Volume node can be an object volume node (use already created node) or 
+  # a string with node name (checks for node with this name and if non existant, creates it with provided type)
   def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode', debugFlag=False):
     # Provided a name (str)
     if isinstance(node, str):
@@ -421,6 +460,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         volume_type = type
         volume_node = slicer.mrmlScene.AddNewNodeByClass(volume_type)
         volume_node.SetName(node_name)
+        if volume_type == 'vtkMRMLLabelMapVolumeNode': # For LabelMap node, create ColorTable
+          colorTableNode = self.createColorTable()
+          volume_node.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
     elif isinstance(node, slicer.vtkMRMLScalarVolumeNode) or isinstance(node, slicer.vtkMRMLLabelMapVolumeNode):
       node_name = node.GetName()
       volume_node = node
@@ -429,11 +471,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       print('Error: variable labelmap is not valid (slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str)')
       return False
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
-    if (debugFlag==True):
-      if volume_type=='vtkMRMLLabelMapVolumeNode':
-        self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'_seg.nrrd', False, 0)
-      else:
-        self.fileWriter.Execute(sitk_image, os.path.join(self.debug_path, node_name)+'.nrrd', False, 0)
     return True
 
   # Given a binary skeleton image (single pixel-wide), find the physical coordinates of extremity closer to the image center
@@ -448,7 +485,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Conver to sitk array order
     extremity1 = (int(extremitys_numpy[0][2]), int(extremitys_numpy[0][1]), int(extremitys_numpy[0][0]))
     extremity2 = (int(extremitys_numpy[1][2]), int(extremitys_numpy[1][1]), int(extremitys_numpy[1][0]))
-    # extremitys_sitk = [coord[::-1] for coord in extremitys_numpy]
     # Calculate the center coordinates of the image volume
     image_shape = sitk_line.GetSize()
     center_coordinates = np.array(image_shape) / 2.0
@@ -515,15 +551,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   #   sitk_mask  = sitk.Cast(sitk_mask, sitk.sitkFloat32)
   #   return sitk_mask
 
-  # Initialize the tracking
-  def initializeTracking(self, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
-    # Initialize sequence counter
-    self.count = 0
+  def setupUNet(self, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
     # Setup UNet model
-    print('Setting UNet')
     model_file= os.path.join(self.path, 'Models', 'model_MP_multi.pth')
     model_unet = UNet(
-      spatial_dims=3, # Mariana: dimensions=3 was deprecated
+      spatial_dims=3,
       in_channels=in_channels,
       out_channels=out_channels,
       channels=[16, 32, 64, 128], 
@@ -534,7 +566,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     self.model = model_unet.to(device)
     self.model.load_state_dict(torch.load(model_file, map_location=device))
-    # Setup transforms
+    ## Setup transforms
     # Define pre-inference transforms
     if in_channels==2:
       pre_array = [
@@ -570,11 +602,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=False),
       PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
     ])  
-    
+  
+  # Initialize the tracking
+  def initializeTracking(self):
+    # Initialize sequence counter
+    self.count = 0
+  
   def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
     # Using only one slice volumes for now
-    # TODO: extend to 3 stacked slices
-    print('Logic: getNeedle()')    
+    # TODO: Maybe we will extend to 3 stacked slices? Not sure if will be necessary
     # Increment sequence counter
     self.count += 1    
     # Get itk images from MRML volume nodes 
@@ -590,6 +626,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag=debugFlag)
       self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag=debugFlag)
+      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+      self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug'))
 
     ######################################
     ##                                  ##
@@ -622,21 +660,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
+    self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug'), is_label=True)
+
+    ######################################
+    ##                                  ##
+    ## Step 2: Get coordinates for tip  ##
+    ##                                  ##
+    ######################################
 
     # Separate labels
     sitk_tip = (sitk_output==2)
     sitk_shaft = (sitk_output==1)
-
-    # Plot
-    if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip', debugFlag=debugFlag)  
-      self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)  
-
-    ######################################
-    ##                                  ##
-    ## Step 2: Get centroid for tip     ##
-    ##                                  ##
-    ######################################
 
     center = None
     shaft_tip = None
@@ -663,38 +697,39 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
       center = labels_centroid[index_largest]             # Get the largest centroid center
       max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
-      if debugFlag:
-        print('Chosen label: %i' %(index_largest+1))
     # Try to get tip estimate from shaft segmentation
     if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
       sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
       shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
-      if debugFlag:
-        self.pushSitkToSlicerVolume(sitk_skeleton, 'debug_skeleton', debugFlag=debugFlag)  
+
+
+    ######################################
+    ##                                  ##
+    ## Step 3: Set confidence for tip   ##
+    ##                                  ##
+    ######################################
+
     # Define confidence on tip estimate
     if center is None:
       center = shaft_tip                            # Use shaft tip (no tip segmentation)
-      self.needleConfidenceNode.SetText('Low')      # Set estimate as low (no tip segmentation, just shaft)
+      confidence = 'Low'      # Set estimate as low (no tip segmentation, just shaft)
     elif shaft_tip is None:
-      self.needleConfidenceNode.SetText('Medium')   # Set estimate as medium (use tip, no shaft segmentation available)
+      confidence = 'Medium'   # Set estimate as medium (use tip, no shaft segmentation available)
     else:
       distance = np.linalg.norm(np.array(center) - np.array(shaft_tip))  # Calculate distance between tip and shaft
-      print('Distance = ' + str(distance))
-      print(center)
-      print(shaft_tip)
       if distance <= max_distance:                             
-        self.needleConfidenceNode.SetText('High')   # Set estimate as high (both tip and shaft segmentation and they are close)
+        confidence = 'High'   # Set estimate as high (both tip and shaft segmentation and they are close)
       else:
-        self.needleConfidenceNode.SetText('Medium') # Set estimate as medium (use tip segmentation, but shaft is not close)
+        confidence = 'Medium' # Set estimate as medium (use tip segmentation, but shaft is not close)
     if center is None:
-      self.needleConfidenceNode.SetText('None')
-      print('Center coordinates: None')
-      print('Confidence: ' + self.needleConfidenceNode.GetText())
-      return False
+      if debugFlag:
+        print('Center coordinates: None')
+        print('Confidence: None')
+      return None
     
     ####################################
     ##                                ##
-    ## Step 3: Push to tipTrackedNode ##
+    ## Step 4: Push to tipTrackedNode ##
     ##                                ##
     ####################################
 
@@ -703,67 +738,50 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # # Plot
     if debugFlag:
       print('Center coordinates: ' + str(centerRAS))
-      print('Confidence: ' + self.needleConfidenceNode.GetText())
+      print('Confidence: ' + confidence)
 
-    # # Push coordinates to tip Node
-    # transformMatrix = vtk.vtkMatrix4x4()
-    # transformMatrix.SetElement(0,3, centerRAS[0])
-    # transformMatrix.SetElement(1,3, centerRAS[1])
-    # transformMatrix.SetElement(2,3, centerRAS[2])
-    # self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
+    # Push coordinates to tip Node
+    transformMatrix = vtk.vtkMatrix4x4()
+    transformMatrix.SetElement(0,3, centerRAS[0])
+    transformMatrix.SetElement(1,3, centerRAS[1])
+    transformMatrix.SetElement(2,3, centerRAS[2])
+    self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
 
-    return True
+    # Push confidence to Node
+    self.needleConfidenceNode.SetText(confidence)
+    return confidence
+
+  # Set Scan Plane Orientation (position is zero)
+  def initializeScanPlane(self, plane='COR'):
+    m = vtk.vtkMatrix4x4()
+    self.scanPlaneTransformNode.GetMatrixTransformToParent(m)
+    if plane == 'AX':
+      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
+      m.SetElement(2, 0, 0); m.SetElement(2, 1, 0); m.SetElement(2, 2, 1)
+    elif plane == 'SAG':
+      m.SetElement(0, 0, 0); m.SetElement(0, 1, 0); m.SetElement(0, 2, 1)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
+      m.SetElement(2, 0, -1); m.SetElement(2, 1, 0); m.SetElement(2, 2, 0)
+    else: #COR
+      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 0); m.SetElement(1, 2, -1)
+      m.SetElement(2, 0, 0); m.SetElement(2, 1, 1); m.SetElement(2, 2, 0)
+    self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
   
-
-
-
-    # # Calculate prediction error
-    # predError = sqrt(pow((tipRAS[0]-centerRAS[0]),2)+pow((tipRAS[1]-centerRAS[1]),2)+pow((tipRAS[2]-centerRAS[2]),2))
-    # # Check error threshold
-    # if(predError>errorThreshold):
-    #   print('Tip too far from prediction')
-    #   return False
-    
-    # # Push coordinates to tip Node
-    # transformMatrix.SetElement(0,3, centerRAS[0])
-    # transformMatrix.SetElement(1,3, centerRAS[1])
-    # transformMatrix.SetElement(2,3, centerRAS[2])
-    # self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
-
-    # # Check number of centroids found
-    # if len(labels_size)>15:
-    #   print('Too many centroids, probably noise')
-    #   return False
-    # # Reasonable number of centroids
-    # # Get larger one
-    # try:
-    #   sorted_by_size = np.argsort(labels_size) 
-    #   first_largest = sorted_by_size[-1]
-    #   # second_largest = sorted_by_size[-2]
-    # except:
-    #   print('No centroids found')
-    #   return False
-    
-    # # Check centroid size with respect to ROI size
-    # if (labels_size[first_largest] > 0.5*roiSize*0.5*roiSize):
-    #   print('Centroid too big, probably noise')
-    #   return False
-    
-
-
-    # # Plot
-    # if debugFlag:
-    #   # print('Chosen label: %i' %(label_index+1))
-    #   print('Chosen label: %i' %(first_largest+1))
-    #   print(centerRAS)
-
-    # # Calculate prediction error
-    # predError = sqrt(pow((tipRAS[0]-centerRAS[0]),2)+pow((tipRAS[1]-centerRAS[1]),2)+pow((tipRAS[2]-centerRAS[2]),2))
-    # # Check error threshold
-    # if(predError>errorThreshold):
-    #   print('Tip too far from prediction')
-    #   return False
-    
-
-
-    # return True
+  def updateScanPlane(self):
+    if self.needleConfidenceNode.GetText() != 'None':
+      # Get current PLAN_0
+      plane_matrix = vtk.vtkMatrix4x4()
+      self.scanPlaneTransformNode.GetMatrixTransformToParent(plane_matrix)
+      # Get current tip transform
+      tip_matrix = vtk.vtkMatrix4x4()
+      self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
+      # Update transform with current tip
+      plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
+      plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
+      plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
+      self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
+    else:
+      print('Scan Plane not updated - No confidence on needle tracking')
+    return
