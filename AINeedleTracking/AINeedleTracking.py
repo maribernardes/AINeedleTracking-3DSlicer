@@ -136,6 +136,22 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     layout.addWidget(self.sceneViewButton_yellow)
     layout.addWidget(self.sceneViewButton_green)
     imagesFormLayout.addRow('Scene view:',layout)   
+
+    # Select OpenIGTLink connection
+    self.connectionSelector = slicer.qMRMLNodeComboBox()
+    self.connectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
+    self.connectionSelector.selectNodeUponCreation = True
+    self.connectionSelector.addEnabled = False
+    self.connectionSelector.removeEnabled = False
+    self.connectionSelector.noneEnabled = True
+    self.connectionSelector.showHidden = False
+    self.connectionSelector.showChildNodeTypes = False
+    self.connectionSelector.setMRMLScene(slicer.mrmlScene)
+    self.connectionSelector.setToolTip('Select OpenIGTLink connection')
+    self.connectionSelector.enabled = False
+    imagesFormLayout.addRow('OpenIGTLink Server: ', self.connectionSelector)
+
+
     
     ## Needle Tracking                
     ####################################
@@ -223,6 +239,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.sceneViewButton_red.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.connectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     
     # Connect UI buttons to event calls
     self.startTrackingButton.connect('clicked(bool)', self.startTracking)
@@ -230,6 +247,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateButtons)
+    self.connectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     
     # Internal variables
     # self.segmentationNode = None
@@ -239,6 +257,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputMode = None
     self.debugFlag = None
     self.updateScanPlane = None
+    self.serverNode = None
 
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
@@ -312,6 +331,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
+    self.connectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('Connection'))
     # Update buttons states
     self.updateButtons()
     # All the GUI updates are done
@@ -330,22 +350,28 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('UpdateScanPlane', 'True' if self.updateScanPlaneCheckBox.checked else 'False')
+    self._parameterNode.SetNodeReferenceID('Connection', self.connectionSelector.currentNodeID)
     self._parameterNode.EndModify(wasModified)
                         
   # Update button states
   def updateButtons(self):
-    rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
-    self.startTrackingButton.enabled = rtNodesDefined and not self.isTrackingOn
-    self.stopTrackingButton.enabled = self.isTrackingOn
     if self.updateScanPlaneCheckBox.checked and not self.isTrackingOn:
       self.sceneViewButton_red.enabled = True
       self.sceneViewButton_yellow.enabled = True
       self.sceneViewButton_green.enabled = True    
+      self.connectionSelector.enabled = True
+      connectionDefined = self.connectionSelector.currentNode()
     else:
       self.sceneViewButton_red.enabled = False
       self.sceneViewButton_yellow.enabled = False
       self.sceneViewButton_green.enabled = False
+      self.connectionSelector.enabled = False
+      connectionDefined = True # Not required
 
+    rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
+    self.startTrackingButton.enabled = rtNodesDefined and connectionDefined and not self.isTrackingOn
+    self.stopTrackingButton.enabled = self.isTrackingOn
+    
   # Get selected scene view for initializing scan plane (PLANE_0)
   def getSelectedView(self):
     selectedView = None
@@ -408,12 +434,14 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
       self.debugFlag = self.debugFlagCheckBox.checked
       self.updateScanPlane = self.updateScanPlaneCheckBox.checked
+      self.serverNode = self.connectionSelector.currentNode()
       # Get needle tip
       confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag) 
       if confidence is None:
         print('Tracking failed')
       elif self.updateScanPlane is True:
         self.logic.updateScanPlane()
+        self.logic.pushScanPlaneToIGTLink(self.serverNode)
         print('Tracked with %s confidence: PLAN_0 updated' %confidence)
       else:
         print('Tracked with %s confidence' %confidence)
@@ -479,7 +507,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
-        parameterNode.SetParameter('Debug', 'False')   
+      parameterNode.SetParameter('Debug', 'False')  
+    if not parameterNode.GetParameter('UpdateScanPlane'): 
+      parameterNode.SetParameter('UpdateScanPlane', 'False')  
   
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
@@ -664,13 +694,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
     ])  
   
-  # Initialize the tracking
+  # Initialize the tracking logic
   def initializeTracking(self, center):
-    # Initialize sequence counter
-    self.count = 0
-    # Reinitiatilze PLAN_0
-    self.initializeScanPlane(center, plane='COR')
+    self.initializeScanPlane(center, plane='COR') # Reinitiatilze PLAN_0 at center position
+    self.count = 0                                # Initialize sequence counter
   
+  def pushScanPlaneToIGTLink(self, connectionNode):
+    #  Push to IGTLink Server
+    connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
+    connectionNode.PushNode(self.scanPlaneTransformNode)
+
   def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
     # Using only one slice volumes for now
     # TODO: Maybe we will extend to 3 stacked slices? Not sure if will be necessary
