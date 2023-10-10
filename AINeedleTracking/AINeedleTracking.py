@@ -112,6 +112,30 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputModeHBoxLayout.addWidget(self.inputModeMagPhase)
     inputModeHBoxLayout.addWidget(self.inputModeRealImag)
     imagesFormLayout.addRow('Input Mode:',inputModeHBoxLayout)
+
+    # UpdateScanPlan mode check box (output images at intermediate steps)
+    self.updateScanPlaneCheckBox = qt.QCheckBox()
+    self.updateScanPlaneCheckBox.checked = False
+    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
+    imagesFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
+
+    # Select which scene view to track
+    self.sceneViewButton_red = qt.QRadioButton('Red')
+    self.sceneViewButton_yellow = qt.QRadioButton('Yellow')
+    self.sceneViewButton_green = qt.QRadioButton('Green')
+    self.sceneViewButton_green.checked = 1
+    self.sceneViewButtonGroup = qt.QButtonGroup()
+    self.sceneViewButtonGroup.addButton(self.sceneViewButton_red)
+    self.sceneViewButtonGroup.addButton(self.sceneViewButton_yellow)
+    self.sceneViewButtonGroup.addButton(self.sceneViewButton_green)
+    self.sceneViewButton_red.enabled = False
+    self.sceneViewButton_yellow.enabled = False
+    self.sceneViewButton_green.enabled = False
+    layout = qt.QHBoxLayout()
+    layout.addWidget(self.sceneViewButton_red)
+    layout.addWidget(self.sceneViewButton_yellow)
+    layout.addWidget(self.sceneViewButton_green)
+    imagesFormLayout.addRow('Scene view:',layout)   
     
     ## Needle Tracking                
     ####################################
@@ -174,11 +198,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
     advancedFormLayout.addRow('Debug', self.debugFlagCheckBox)
 
-    # UpdateScanPlan mode check box (output images at intermediate steps)
-    self.updateScanPlaneCheckBox = qt.QCheckBox()
-    self.updateScanPlaneCheckBox.checked = False
-    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
-    advancedFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
 
     self.layout.addStretch(1)
     
@@ -201,12 +220,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.sceneViewButton_red.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.sceneViewButton_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.sceneViewButton_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     
     # Connect UI buttons to event calls
     self.startTrackingButton.connect('clicked(bool)', self.startTracking)
     self.stopTrackingButton.connect('clicked(bool)', self.stopTracking)
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
+    self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateButtons)
     
     # Internal variables
     # self.segmentationNode = None
@@ -289,7 +312,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
-    
     # Update buttons states
     self.updateButtons()
     # All the GUI updates are done
@@ -315,7 +337,44 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
     self.startTrackingButton.enabled = rtNodesDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
-    
+    if self.updateScanPlaneCheckBox.checked and not self.isTrackingOn:
+      self.sceneViewButton_red.enabled = True
+      self.sceneViewButton_yellow.enabled = True
+      self.sceneViewButton_green.enabled = True    
+    else:
+      self.sceneViewButton_red.enabled = False
+      self.sceneViewButton_yellow.enabled = False
+      self.sceneViewButton_green.enabled = False
+
+  # Get selected scene view for initializing scan plane (PLANE_0)
+  def getSelectedView(self):
+    selectedView = None
+    if (self.sceneViewButton_red.checked == True):
+      selectedView = ('Red')
+    elif (self.sceneViewButton_yellow.checked ==True):
+      selectedView = ('Yellow')
+    elif (self.sceneViewButton_green.checked ==True):
+      selectedView = ('Green')
+    return selectedView
+  
+  # Get center coordinates from current selected view
+  def getSelectetViewCenterCoordinates(self, selectedView):
+    # Get slice widget from selected view
+    layoutManager = slicer.app.layoutManager()
+    sliceWidgetLogic = layoutManager.sliceWidget(str(selectedView)).sliceLogic()
+    # Get slice index and volume node
+    sliceIndex = sliceWidgetLogic.GetSliceIndexFromOffset(sliceWidgetLogic.GetSliceOffset()) - 1
+    compositeNode = sliceWidgetLogic.GetSliceCompositeNode()
+    volumeNode = slicer.util.getNode(compositeNode.GetBackgroundVolumeID())
+    # Get image from volumeNode
+    sitk_image = sitkUtils.PullVolumeFromSlicer(volumeNode)
+    # Get the slice center coordinates
+    image_size = sitk_image.GetSize()
+    centerIndex = (int(image_size[0]/2), int(image_size[1]/2), sliceIndex)
+    centerLPS = sitk_image.TransformIndexToPhysicalPoint(centerIndex)
+    centerRAS = (-centerLPS[0], -centerLPS[1], centerLPS[2])   
+    return centerRAS
+
   def startTracking(self):
     print('UI: startTracking()')
     self.isTrackingOn = True
@@ -323,8 +382,15 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Get parameters
     # Get selected nodes
     self.firstVolume = self.firstVolumeSelector.currentNode()
-    self.secondVolume = self.secondVolumeSelector.currentNode()    
-    self.logic.initializeTracking()
+    self.secondVolume = self.secondVolumeSelector.currentNode() 
+    self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
+    # Get PLAN_0 translation coordinates
+    if self.updateScanPlane == True:
+      center = self.getSelectetViewCenterCoordinates(self.getSelectedView())
+    else:
+      center = (0,0,0) 
+    # Initialize tracking logic
+    self.logic.initializeTracking(center)
     # Create listener to sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
@@ -393,7 +459,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode.SetName('NeedleLabelMap')
         colorTableNode = self.createColorTable()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
-        # print('Created Needle Segmentation Node')
 
     # Check if text node exists, if not, create a new one
     try:
@@ -402,7 +467,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleConfidenceNode = slicer.vtkMRMLTextNode()
         slicer.mrmlScene.AddNode(self.needleConfidenceNode)
         self.needleConfidenceNode.SetName('CurrentTipConfidence')
-        # print('Created Needle Confidence Node')
 
     # Check if tracked tip node exists, if not, create a new one
     try:
@@ -411,10 +475,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipTrackedNode = slicer.vtkMRMLLinearTransformNode()
         slicer.mrmlScene.AddNode(self.tipTrackedNode)
         self.tipTrackedNode.SetName('CurrentTrackedTipTransform')
-        # print('Created Tracked Tip TransformNode')
 
-
-    
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
@@ -604,9 +665,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ])  
   
   # Initialize the tracking
-  def initializeTracking(self):
+  def initializeTracking(self, center):
     # Initialize sequence counter
     self.count = 0
+    # Reinitiatilze PLAN_0
+    self.initializeScanPlane(center, plane='COR')
   
   def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
     # Using only one slice volumes for now
@@ -748,13 +811,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
 
     # Push confidence to Node
-    self.needleConfidenceNode.SetText(confidence)
+    self.needleConfidenceNode.SetText(confidence) 
     return confidence
 
   # Set Scan Plane Orientation (position is zero)
-  def initializeScanPlane(self, plane='COR'):
+  def initializeScanPlane(self, center=(0,0,0), plane='COR'):
     m = vtk.vtkMatrix4x4()
     self.scanPlaneTransformNode.GetMatrixTransformToParent(m)
+    # Set rotation
     if plane == 'AX':
       m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
       m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
@@ -767,6 +831,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
       m.SetElement(1, 0, 0); m.SetElement(1, 1, 0); m.SetElement(1, 2, -1)
       m.SetElement(2, 0, 0); m.SetElement(2, 1, 1); m.SetElement(2, 2, 0)
+    # Set translation
+    m.SetElement(0, 3, center[0])
+    m.SetElement(1, 3, center[1])
+    m.SetElement(2, 3, center[2])
     self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
   
   def updateScanPlane(self):
