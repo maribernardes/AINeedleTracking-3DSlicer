@@ -417,6 +417,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       center = (0,0,0) 
     # Initialize tracking logic
     self.logic.initializeTracking(center)
+    # Check for needle in the current images
+    self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag) 
     # Create listener to sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
@@ -486,6 +488,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         self.needleLabelMapNode.SetName('NeedleLabelMap')
         colorTableNode = self.createColorTable()
+        self.needleLabelMapNode.CreateDefaultDisplayNodes()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
 
     # Check if text node exists, if not, create a new one
@@ -514,7 +517,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
   def createColorTable(self):
-    label_list = [('tip', 1, (1.0, 1.0, 0.0, 1.0)), ("shaft", 2, (1.0, 1.0, 0.0, 1.0))]
+    label_list = [("shaft", 1, 0.2, 0.5, 0.8), ('tip', 2, 1.0, 0.8, 0.7)]
     colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
     colorTableNode.SetTypeToUser()
     colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
@@ -523,8 +526,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     largestLabelValue = max([name_value[1] for name_value in label_list])
     colorTableNode.SetNumberOfColors(largestLabelValue + 1)
     colorTableNode.SetNamesInitialised(True) # prevent automatic color name generation
-    for labelName, labelValue, labelColor in label_list:
-        colorTableNode.SetColor(labelValue, labelName, labelColor)
+    for labelName, labelValue, labelColorR, labelColorG, labelColorB in label_list:
+      colorTableNode.SetColor(labelValue, labelName, labelColorR, labelColorG, labelColorB)
     return colorTableNode
   
   def saveSitkImage(self, sitk_image, name, path, is_label=False):
