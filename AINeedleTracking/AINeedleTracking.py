@@ -693,7 +693,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       ),
       Activationsd(keys="pred", sigmoid=True),
       AsDiscreted(keys="pred", argmax=True, num_classes=3),
-      RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=False),
+      RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=True),
       PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
     ])  
   
