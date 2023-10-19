@@ -498,7 +498,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolume = self.secondVolumeSelector.currentNode() 
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
     self.serverNode = self.connectionSelector.currentNode()
-    self.zFrameTransform = self.transformSelector.currentNode()     
+    self.zFrameTransform = self.transformSelector.currentNode()
     # Initialize tracking logic
     self.logic.initializeTracking(model)
     # Initialize PLAN_0
@@ -507,7 +507,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.logic.initializeScanPlane(center, plane='COR') # Reinitialize PLAN_0 at center position
     # Initialize zFrame transform
     if self.pushTipToRobot == True:
-      self.logic.initializePushTip()
+      self.logic.initializePushTip(self.zFrameTransform)
     # Check for needle in the current images
     self.getNeedle() 
     # Create listener to image sequence node
@@ -538,7 +538,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.logic.pushScanPlaneToIGTLink(self.serverNode)
           print('PLAN_0 updated')
         if self.pushTipToRobot is True:
-          self.logic.pushTipToIGTLink(self.serverNode, self.zFrameTransform)
+          self.logic.pushTipToIGTLink(self.serverNode)
           print('Tip pushed to robot')
     
 ################################################################################################################################################
@@ -604,6 +604,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipTrackedZNode.SetName('CurrentTrackedTipZ')
         self.tipTrackedZNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.tipTrackedZNode)
+
+    # Check if WorldToZFrame transform node exists, if not, create a new one
+    try:
+        self.worldToZFrameNode = slicer.util.getNode('WorldToZFrame')
+    except:
+        self.worldToZFrameNode = slicer.vtkMRMLLinearTransformNode()
+        self.worldToZFrameNode.SetName('WorldToZFrame')
+        self.worldToZFrameNode.SetHideFromEditors(True)
+        slicer.mrmlScene.AddNode(self.worldToZFrameNode)
         
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
@@ -625,6 +634,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     colorTableNode.SetTypeToUser()
     colorTableNode.SetName('NeedleColorMap')
     slicer.mrmlScene.AddNode(colorTableNode); 
+    colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
     colorTableNode.UnRegister(None)
     largestLabelValue = max([name_value[1] for name_value in label_list])
     colorTableNode.SetNumberOfColors(largestLabelValue + 1)
@@ -821,8 +831,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.setupUNet(model) # Setup UNet
     self.count = 0        # Initialize sequence counter
 
-  def initializePushTip(self):
-    print('TODO: initializePushTip')
+  def initializePushTip(self, zFrameToWorld):
+    # Get world to ZFrame transformations
+    worldToZFrame = vtk.vtkMatrix4x4()
+    zFrameToWorld.GetMatrixTransformFromWorld(worldToZFrame)
+    # Set it to worldToZFrameNode
+    self.worldToZFrameNode.SetMatrixTransformToParent(worldToZFrame)
   
   # Set Scan Plane Orientation (position is zero)
   def initializeScanPlane(self, center=(0,0,0), plane='COR'):
@@ -864,12 +878,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       print('Scan Plane not updated - No confidence on needle tracking')
     return
   
-  def updateTipToRobot(self):
-    print('TODO: updateTipToRobot')
-  
-  def pushTipToIGTLink(self, connectionNode, zTransformNode):
-    # Get tip coordinates and transform to zFrame
-    print('TODO: pushTipToIGTLink')
+  def pushTipToIGTLink(self, connectionNode):
+    # Apply zTransform to currentTip
+    self.tipTrackedZNode.CopyContent(self.tipTrackedNode)
+    self.tipTrackedZNode.SetAndObserveTransformNodeID(self.worldToZFrameNode.GetID())
+    self.tipTrackedZNode.HardenTransform()
+    #  Push to IGTLink Server
+    connectionNode.RegisterOutgoingMRMLNode(self.tipTrackedZNode)
+    connectionNode.PushNode(self.tipTrackedZNode)
 
   def pushScanPlaneToIGTLink(self, connectionNode):
     #  Push to IGTLink Server
