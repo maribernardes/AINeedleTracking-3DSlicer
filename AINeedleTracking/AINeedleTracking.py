@@ -602,7 +602,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     except:
         self.tipTrackedZNode = slicer.vtkMRMLLinearTransformNode()
         self.tipTrackedZNode.SetName('CurrentTrackedTipZ')
-        self.tipTrackedZNode.SetHideFromEditors(True)
+        # self.tipTrackedZNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.tipTrackedZNode)
 
     # Check if WorldToZFrame transform node exists, if not, create a new one
@@ -611,7 +611,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     except:
         self.worldToZFrameNode = slicer.vtkMRMLLinearTransformNode()
         self.worldToZFrameNode.SetName('WorldToZFrame')
-        self.worldToZFrameNode.SetHideFromEditors(True)
+        # self.worldToZFrameNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.worldToZFrameNode)
         
   # Initialize parameter node with default settings
@@ -883,14 +883,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tipTrackedZNode.CopyContent(self.tipTrackedNode)
     self.tipTrackedZNode.SetAndObserveTransformNodeID(self.worldToZFrameNode.GetID())
     self.tipTrackedZNode.HardenTransform()
-    #  Push to IGTLink Server
+    #  Push to IGTLink
     connectionNode.RegisterOutgoingMRMLNode(self.tipTrackedZNode)
     connectionNode.PushNode(self.tipTrackedZNode)
+    connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedZNode)
 
   def pushScanPlaneToIGTLink(self, connectionNode):
-    #  Push to IGTLink Server
+    #  Push to IGTLink
     connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
     connectionNode.PushNode(self.scanPlaneTransformNode)
+    connectionNode.UnregisterOutgoingMRMLNode(self.scanPlaneTransformNode)
 
   def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
     # Using only one slice volumes for now
