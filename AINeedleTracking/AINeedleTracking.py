@@ -15,7 +15,7 @@ from math import sqrt, pow
 import torch
 from monaiUtils.sitkIO import LoadSitkImaged, PushSitkImaged
 from monai.transforms import Compose, ConcatItemsd, EnsureChannelFirstd, ScaleIntensityd, Orientationd, Spacingd
-from monai.transforms import Invertd, Activationsd, AsDiscreted, RemoveSmallObjectsd
+from monai.transforms import Invertd, Activationsd, AsDiscreted, KeepLargestConnectedComponentd, RemoveSmallObjectsd
 from monai.networks.nets import UNet 
 from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
@@ -96,10 +96,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     ## Setup                
     ####################################
     
-    imagesCollapsibleButton = ctk.ctkCollapsibleButton()
-    imagesCollapsibleButton.text = 'Setup'
-    self.layout.addWidget(imagesCollapsibleButton)
-    imagesFormLayout = qt.QFormLayout(imagesCollapsibleButton)
+    setupCollapsibleButton = ctk.ctkCollapsibleButton()
+    setupCollapsibleButton.text = 'Setup'
+    self.layout.addWidget(setupCollapsibleButton)
+    setupFormLayout = qt.QFormLayout(setupCollapsibleButton)
     
     # Input mode
     self.inputModeMagPhase = qt.QRadioButton('Magnitude/Phase')
@@ -111,13 +111,20 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputModeHBoxLayout = qt.QHBoxLayout()
     inputModeHBoxLayout.addWidget(self.inputModeMagPhase)
     inputModeHBoxLayout.addWidget(self.inputModeRealImag)
-    imagesFormLayout.addRow('Input Mode:',inputModeHBoxLayout)
+    setupFormLayout.addRow('Input Mode:',inputModeHBoxLayout)
+    
+    # AI model
+    self.modelFileSelector = qt.QComboBox()
+    modelPath= os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Models')
+    self.modelList = [f for f in os.listdir(modelPath) if os.path.isfile(os.path.join(modelPath, f))]
+    self.modelFileSelector.addItems(self.modelList)
+    setupFormLayout.addRow('AI Model:',self.modelFileSelector)
 
     # UpdateScanPlan mode check box (output images at intermediate steps)
     self.updateScanPlaneCheckBox = qt.QCheckBox()
     self.updateScanPlaneCheckBox.checked = False
     self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
-    imagesFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
+    setupFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
 
     # Select which scene view to track
     self.sceneViewButton_red = qt.QRadioButton('Red')
@@ -135,7 +142,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     layout.addWidget(self.sceneViewButton_red)
     layout.addWidget(self.sceneViewButton_yellow)
     layout.addWidget(self.sceneViewButton_green)
-    imagesFormLayout.addRow('Scene view:',layout)   
+    setupFormLayout.addRow('Scene view:',layout)   
 
     # Select OpenIGTLink connection
     self.connectionSelector = slicer.qMRMLNodeComboBox()
@@ -149,9 +156,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.connectionSelector.setMRMLScene(slicer.mrmlScene)
     self.connectionSelector.setToolTip('Select OpenIGTLink connection')
     self.connectionSelector.enabled = False
-    imagesFormLayout.addRow('OpenIGTLink Server: ', self.connectionSelector)
-
-
+    setupFormLayout.addRow('OpenIGTLink Server: ', self.connectionSelector)
     
     ## Needle Tracking                
     ####################################
@@ -214,7 +219,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
     advancedFormLayout.addRow('Debug', self.debugFlagCheckBox)
 
-
     self.layout.addStretch(1)
     
     ####################################
@@ -240,6 +244,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.sceneViewButton_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.connectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.modelFileSelector.connect('currentIndexChanged(str)', self.updateParameterNodeFromGUI)
     
     # Connect UI buttons to event calls
     self.startTrackingButton.connect('clicked(bool)', self.startTracking)
@@ -332,6 +337,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
     self.connectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('Connection'))
+    self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
     # Update buttons states
     self.updateButtons()
     # All the GUI updates are done
@@ -351,6 +357,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('UpdateScanPlane', 'True' if self.updateScanPlaneCheckBox.checked else 'False')
     self._parameterNode.SetNodeReferenceID('Connection', self.connectionSelector.currentNodeID)
+    self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex()))
     self._parameterNode.EndModify(wasModified)
                         
   # Update button states
@@ -406,6 +413,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.isTrackingOn = True
     self.updateButtons()
     # Get parameters
+    model = self.modelFileSelector.currentText
+    debugFlag = self.debugFlagCheckBox.checked
     # Get selected nodes
     self.firstVolume = self.firstVolumeSelector.currentNode()
     self.secondVolume = self.secondVolumeSelector.currentNode() 
@@ -416,9 +425,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     else:
       center = (0,0,0) 
     # Initialize tracking logic
-    self.logic.initializeTracking(center)
+    self.logic.initializeTracking(model, center)
     # Check for needle in the current images
-    self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag) 
+    self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=debugFlag) 
     # Create listener to sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
@@ -434,11 +443,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.isTrackingOn:
       # Get parameters
       self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
-      self.debugFlag = self.debugFlagCheckBox.checked
       self.updateScanPlane = self.updateScanPlaneCheckBox.checked
       self.serverNode = self.connectionSelector.currentNode()
+      debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=self.debugFlag) 
+      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=debugFlag) 
       if confidence is None:
         print('Tracking failed')
       elif self.updateScanPlane is True:
@@ -466,9 +475,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Used for saving data from experiments
     self.count = None
-
-    # Setup UNet
-    self.setupUNet()
 
     # Check if PLANE_0 node exists, if not, create a new one
     try:
@@ -513,7 +519,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('Debug', 'False')  
     if not parameterNode.GetParameter('UpdateScanPlane'): 
       parameterNode.SetParameter('UpdateScanPlane', 'False')  
-  
+    if not parameterNode.GetParameter('Model'): 
+      parameterNode.SetParameter('Model', '0')
+        
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
   def createColorTable(self):
@@ -591,6 +599,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
         return sitk_line.TransformIndexToPhysicalPoint(extremity2)
 
+  def getNeedleDirection(labelmap):
+    # Get the voxel coordinates of the labeled points (non-zero values) in the labelmap
+    coordinates = np.array(np.where(labelmap))
+    # Center the data by subtracting the mean
+    centered_coordinates = coordinates - np.mean(coordinates, axis=1, keepdims=True)
+    # Compute the covariance matrix
+    covariance_matrix = np.cov(centered_coordinates)
+    # Perform PCA to find the principal direction (eigenvector) and its corresponding eigenvalue
+    eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
+    # Sort eigenvectors by decreasing eigenvalues
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    eigenvectors = eigenvectors[:, sorted_indices]
+    principal_direction = eigenvectors[:, 0]
+    return principal_direction
+  
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
     image = sitk.GetImageFromArray(array, isVector=False)
@@ -645,9 +668,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   #   sitk_mask  = sitk.Cast(sitk_mask, sitk.sitkFloat32)
   #   return sitk_mask
 
-  def setupUNet(self, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
+  def setupUNet(self, model, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
     # Setup UNet model
-    model_file= os.path.join(self.path, 'Models', 'model_MP_multi.pth')
+    model_file= os.path.join(self.path, 'Models', model)
     model_unet = UNet(
       spatial_dims=3,
       in_channels=in_channels,
@@ -693,12 +716,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       ),
       Activationsd(keys="pred", sigmoid=True),
       AsDiscreted(keys="pred", argmax=True, num_classes=3),
-      RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=True),
+      # RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=True),
+      # KeepLargestConnectedComponentd(keys="pred", independent=True),
       PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
     ])  
   
   # Initialize the tracking logic
-  def initializeTracking(self, center):
+  def initializeTracking(self, model, center):
+    self.setupUNet(model) # Setup UNet
     self.initializeScanPlane(center, plane='COR') # Reinitiatilze PLAN_0 at center position
     self.count = 0                                # Initialize sequence counter
   
@@ -800,6 +825,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
       sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
       shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+      # shaft_direction = self.getShaftDirection()
 
 
     ######################################
