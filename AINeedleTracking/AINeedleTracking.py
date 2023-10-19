@@ -505,7 +505,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.updateScanPlane == True:
       center = self.getSelectetViewCenterCoordinates(self.getSelectedView())
       self.logic.initializeScanPlane(center, plane='COR') # Reinitialize PLAN_0 at center position
-    # Initialize zFrame
+    # Initialize zFrame transform
     if self.pushTipToRobot == True:
       self.logic.initializePushTip()
     # Check for needle in the current images
@@ -565,8 +565,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.initializeScanPlane(plane='COR')
     except:
       self.scanPlaneTransformNode = slicer.vtkMRMLLinearTransformNode()
-      slicer.mrmlScene.AddNode(self.scanPlaneTransformNode)
       self.scanPlaneTransformNode.SetName('PLANE_0')
+      slicer.mrmlScene.AddNode(self.scanPlaneTransformNode)
       self.initializeScanPlane(plane='COR')
 
     # Check if labelmap node exists, if not, create a new one
@@ -574,8 +574,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode = slicer.util.getNode('NeedleLabelMap')
     except:
         self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         self.needleLabelMapNode.SetName('NeedleLabelMap')
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         colorTableNode = self.createColorTable()
         self.needleLabelMapNode.CreateDefaultDisplayNodes()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
@@ -585,17 +585,26 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleConfidenceNode = slicer.util.getNode('CurrentTipConfidence')
     except:
         self.needleConfidenceNode = slicer.vtkMRMLTextNode()
-        slicer.mrmlScene.AddNode(self.needleConfidenceNode)
         self.needleConfidenceNode.SetName('CurrentTipConfidence')
-
+        slicer.mrmlScene.AddNode(self.needleConfidenceNode)
+        
     # Check if tracked tip node exists, if not, create a new one
     try:
         self.tipTrackedNode = slicer.util.getNode('CurrentTrackedTipTransform')
     except:
         self.tipTrackedNode = slicer.vtkMRMLLinearTransformNode()
-        slicer.mrmlScene.AddNode(self.tipTrackedNode)
         self.tipTrackedNode.SetName('CurrentTrackedTipTransform')
+        slicer.mrmlScene.AddNode(self.tipTrackedNode)
 
+    # Check if zFrame tracked tip node exists, if not, create a new one
+    try:
+        self.tipTrackedZNode = slicer.util.getNode('CurrentTrackedTipZ')
+    except:
+        self.tipTrackedZNode = slicer.vtkMRMLLinearTransformNode()
+        self.tipTrackedZNode.SetName('CurrentTrackedTipZ')
+        self.tipTrackedZNode.SetHideFromEditors(True)
+        slicer.mrmlScene.AddNode(self.tipTrackedZNode)
+        
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
@@ -612,8 +621,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def createColorTable(self):
     label_list = [("shaft", 1, 0.2, 0.5, 0.8), ('tip', 2, 1.0, 0.8, 0.7)]
     colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
+    colorTableNode.SetHideFromEditors(True)
     colorTableNode.SetTypeToUser()
-    colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
+    colorTableNode.SetName('NeedleColorMap')
     slicer.mrmlScene.AddNode(colorTableNode); 
     colorTableNode.UnRegister(None)
     largestLabelValue = max([name_value[1] for name_value in label_list])
@@ -810,15 +820,58 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def initializeTracking(self, model):
     self.setupUNet(model) # Setup UNet
     self.count = 0        # Initialize sequence counter
-  
-  def pushScanPlaneToIGTLink(self, connectionNode):
-    #  Push to IGTLink Server
-    connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
-    connectionNode.PushNode(self.scanPlaneTransformNode)
 
+  def initializePushTip(self):
+    print('TODO: initializePushTip')
+  
+  # Set Scan Plane Orientation (position is zero)
+  def initializeScanPlane(self, center=(0,0,0), plane='COR'):
+    m = vtk.vtkMatrix4x4()
+    self.scanPlaneTransformNode.GetMatrixTransformToParent(m)
+    # Set rotation
+    if plane == 'AX':
+      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
+      m.SetElement(2, 0, 0); m.SetElement(2, 1, 0); m.SetElement(2, 2, 1)
+    elif plane == 'SAG':
+      m.SetElement(0, 0, 0); m.SetElement(0, 1, 0); m.SetElement(0, 2, 1)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
+      m.SetElement(2, 0, -1); m.SetElement(2, 1, 0); m.SetElement(2, 2, 0)
+    else: #COR
+      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
+      m.SetElement(1, 0, 0); m.SetElement(1, 1, 0); m.SetElement(1, 2, -1)
+      m.SetElement(2, 0, 0); m.SetElement(2, 1, 1); m.SetElement(2, 2, 0)
+    # Set translation
+    m.SetElement(0, 3, center[0])
+    m.SetElement(1, 3, center[1])
+    m.SetElement(2, 3, center[2])
+    self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
+
+  def updateScanPlane(self):
+    if self.needleConfidenceNode.GetText() != 'None':
+      # Get current PLAN_0
+      plane_matrix = vtk.vtkMatrix4x4()
+      self.scanPlaneTransformNode.GetMatrixTransformToParent(plane_matrix)
+      # Get current tip transform
+      tip_matrix = vtk.vtkMatrix4x4()
+      self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
+      # Update transform with current tip
+      plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
+      plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
+      plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
+      self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
+    else:
+      print('Scan Plane not updated - No confidence on needle tracking')
+    return
+  
+  def updateTipToRobot(self):
+    print('TODO: updateTipToRobot')
+  
   def pushTipToIGTLink(self, connectionNode, zTransformNode):
     # Get tip coordinates and transform to zFrame
+    print('TODO: pushTipToIGTLink')
 
+  def pushScanPlaneToIGTLink(self, connectionNode):
     #  Push to IGTLink Server
     connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
     connectionNode.PushNode(self.scanPlaneTransformNode)
@@ -966,46 +1019,3 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Push confidence to Node
     self.needleConfidenceNode.SetText(confidence) 
     return confidence
-
-  # Set Scan Plane Orientation (position is zero)
-  def initializeScanPlane(self, center=(0,0,0), plane='COR'):
-    m = vtk.vtkMatrix4x4()
-    self.scanPlaneTransformNode.GetMatrixTransformToParent(m)
-    # Set rotation
-    if plane == 'AX':
-      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
-      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
-      m.SetElement(2, 0, 0); m.SetElement(2, 1, 0); m.SetElement(2, 2, 1)
-    elif plane == 'SAG':
-      m.SetElement(0, 0, 0); m.SetElement(0, 1, 0); m.SetElement(0, 2, 1)
-      m.SetElement(1, 0, 0); m.SetElement(1, 1, 1); m.SetElement(1, 2, 0)
-      m.SetElement(2, 0, -1); m.SetElement(2, 1, 0); m.SetElement(2, 2, 0)
-    else: #COR
-      m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
-      m.SetElement(1, 0, 0); m.SetElement(1, 1, 0); m.SetElement(1, 2, -1)
-      m.SetElement(2, 0, 0); m.SetElement(2, 1, 1); m.SetElement(2, 2, 0)
-    # Set translation
-    m.SetElement(0, 3, center[0])
-    m.SetElement(1, 3, center[1])
-    m.SetElement(2, 3, center[2])
-    self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
-  
-  def updateScanPlane(self):
-    if self.needleConfidenceNode.GetText() != 'None':
-      # Get current PLAN_0
-      plane_matrix = vtk.vtkMatrix4x4()
-      self.scanPlaneTransformNode.GetMatrixTransformToParent(plane_matrix)
-      # Get current tip transform
-      tip_matrix = vtk.vtkMatrix4x4()
-      self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
-      # Update transform with current tip
-      plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
-      plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
-      plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
-      self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
-    else:
-      print('Scan Plane not updated - No confidence on needle tracking')
-    return
-  
-  def initializePushTip(self):
-    return
