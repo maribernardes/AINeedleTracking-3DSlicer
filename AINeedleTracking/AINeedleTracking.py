@@ -100,6 +100,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     setupCollapsibleButton.text = 'Setup'
     self.layout.addWidget(setupCollapsibleButton)
     setupFormLayout = qt.QFormLayout(setupCollapsibleButton)
+
+    separator1 = SeparatorWidget('Tracking setup')
+    setupFormLayout.addRow(separator1)
     
     # Input mode
     self.inputModeMagPhase = qt.QRadioButton('Magnitude/Phase')
@@ -120,11 +123,53 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.modelFileSelector.addItems(self.modelList)
     setupFormLayout.addRow('AI Model:',self.modelFileSelector)
 
+    separator2 = SeparatorWidget('Optional IGTLink')
+    setupFormLayout.addRow(separator2)
+
+    igtlHBoxLayout = qt.QHBoxLayout()   
+    # Push tip coordinates to robot
+    self.pushTipToRobotCheckBox = qt.QCheckBox()
+    self.pushTipToRobotCheckBox.checked = False
+    self.pushTipToRobotCheckBox.setToolTip('If checked, pushes current tip position to robot in zFrame coordinates')
+    igtlHBoxLayout.addWidget(qt.QLabel('Push Tip to Robot'))
+    igtlHBoxLayout.addWidget(self.pushTipToRobotCheckBox)
+    
     # UpdateScanPlan mode check box (output images at intermediate steps)
     self.updateScanPlaneCheckBox = qt.QCheckBox()
     self.updateScanPlaneCheckBox.checked = False
     self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
-    setupFormLayout.addRow('Update Scan Plane', self.updateScanPlaneCheckBox)
+    igtlHBoxLayout.addWidget(qt.QLabel('Update Scan Plane'))
+    igtlHBoxLayout.addWidget(self.updateScanPlaneCheckBox)
+
+    setupFormLayout.addRow(igtlHBoxLayout)
+
+    # Select OpenIGTLink connection
+    self.connectionSelector = slicer.qMRMLNodeComboBox()
+    self.connectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
+    self.connectionSelector.selectNodeUponCreation = True
+    self.connectionSelector.addEnabled = False
+    self.connectionSelector.removeEnabled = False
+    self.connectionSelector.noneEnabled = True
+    self.connectionSelector.showHidden = False
+    self.connectionSelector.showChildNodeTypes = False
+    self.connectionSelector.setMRMLScene(slicer.mrmlScene)
+    self.connectionSelector.setToolTip('Select OpenIGTLink connection')
+    self.connectionSelector.enabled = False
+    setupFormLayout.addRow('OpenIGTLink Server:', self.connectionSelector)
+
+    # Select WorldToZFrame transform
+    self.transformSelector = slicer.qMRMLNodeComboBox()
+    self.transformSelector.nodeTypes = ['vtkMRMLLinearTransformNode']
+    self.transformSelector.selectNodeUponCreation = True
+    self.transformSelector.addEnabled = False
+    self.transformSelector.removeEnabled = False
+    self.transformSelector.noneEnabled = True
+    self.transformSelector.showHidden = False
+    self.transformSelector.showChildNodeTypes = False
+    self.transformSelector.setMRMLScene(slicer.mrmlScene)
+    self.transformSelector.setToolTip('Select ZFrame registration transform')
+    self.transformSelector.enabled = False
+    setupFormLayout.addRow('ZFrame Transform:', self.transformSelector)
 
     # Select which scene view to track
     self.sceneViewButton_red = qt.QRadioButton('Red')
@@ -143,20 +188,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     layout.addWidget(self.sceneViewButton_yellow)
     layout.addWidget(self.sceneViewButton_green)
     setupFormLayout.addRow('Scene view:',layout)   
-
-    # Select OpenIGTLink connection
-    self.connectionSelector = slicer.qMRMLNodeComboBox()
-    self.connectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
-    self.connectionSelector.selectNodeUponCreation = True
-    self.connectionSelector.addEnabled = False
-    self.connectionSelector.removeEnabled = False
-    self.connectionSelector.noneEnabled = True
-    self.connectionSelector.showHidden = False
-    self.connectionSelector.showChildNodeTypes = False
-    self.connectionSelector.setMRMLScene(slicer.mrmlScene)
-    self.connectionSelector.setToolTip('Select OpenIGTLink connection')
-    self.connectionSelector.enabled = False
-    setupFormLayout.addRow('OpenIGTLink Server: ', self.connectionSelector)
     
     ## Needle Tracking                
     ####################################
@@ -240,10 +271,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_red.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.sceneViewButton_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.connectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.transformSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.modelFileSelector.connect('currentIndexChanged(str)', self.updateParameterNodeFromGUI)
     
     # Connect UI buttons to event calls
@@ -252,17 +285,20 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateButtons)
+    self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateButtons)
     self.connectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
+    self.transformSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     
     # Internal variables
-    # self.segmentationNode = None
     self.isTrackingOn = False
+    self.inputMode = None
     self.firstVolume = None
     self.secondVolume = None
-    self.inputMode = None
     self.debugFlag = None
     self.updateScanPlane = None
+    self.pushTipToRobot = None
     self.serverNode = None
+    self.zFrameTransform = None
 
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
@@ -336,7 +372,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
+    self.pushTipToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTipToRobot') == 'True')
     self.connectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('Connection'))
+    self.transformSelector.setCurrentNode(self._parameterNode.GetNodeReference('zFrame'))
     self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
     # Update buttons states
     self.updateButtons()
@@ -356,27 +394,67 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('UpdateScanPlane', 'True' if self.updateScanPlaneCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('PushTipToRobot', 'True' if self.pushTipToRobotCheckBox.checked else 'False')
     self._parameterNode.SetNodeReferenceID('Connection', self.connectionSelector.currentNodeID)
-    self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex()))
+    self._parameterNode.SetNodeReferenceID('zFrame', self.transformSelector.currentNodeID)
+    self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex))
     self._parameterNode.EndModify(wasModified)
                         
   # Update button states
   def updateButtons(self):
-    if self.updateScanPlaneCheckBox.checked and not self.isTrackingOn:
-      self.sceneViewButton_red.enabled = True
-      self.sceneViewButton_yellow.enabled = True
-      self.sceneViewButton_green.enabled = True    
-      self.connectionSelector.enabled = True
-      connectionDefined = self.connectionSelector.currentNode()
+    # Not tracking = ENABLE SELECTION
+    if not self.isTrackingOn:
+      # Logic for required variables selection: 
+      self.inputModeMagPhase.enabled = True
+      self.inputModeRealImag.enabled = True
+      self.modelFileSelector.enabled = True
+      self.pushTipToRobotCheckBox.enabled = True
+      self.updateScanPlaneCheckBox.enabled = True
+      self.firstVolumeSelector.enabled = True
+      self.secondVolumeSelector.enabled = True
+      connectionDefined = True # Not required
+      transformDefined = True  # Not required      
+      # Logic for optional variables selection
+      if self.updateScanPlaneCheckBox.checked:
+        self.sceneViewButton_red.enabled = True
+        self.sceneViewButton_yellow.enabled = True
+        self.sceneViewButton_green.enabled = True    
+        self.connectionSelector.enabled = True
+        self.transformSelector.enabled = False
+        connectionDefined = self.connectionSelector.currentNode()
+        transformDefined = True  # Not required
+      if self.pushTipToRobotCheckBox.checked:
+        if not self.updateScanPlaneCheckBox.checked:
+          self.sceneViewButton_red.enabled = False
+          self.sceneViewButton_yellow.enabled = False
+          self.sceneViewButton_green.enabled = False    
+        self.connectionSelector.enabled = True
+        self.transformSelector.enabled = True
+        connectionDefined = self.connectionSelector.currentNode()
+        transformDefined = self.transformSelector.currentNode()
+      if (not self.updateScanPlaneCheckBox.checked) and not self.pushTipToRobotCheckBox.checked:
+        self.connectionSelector.enabled = False
+        self.transformSelector.enabled = False 
+    # When tracking = DISABLE SELECTION
     else:
+      self.inputModeMagPhase.enabled = False
+      self.inputModeRealImag.enabled = False
+      self.modelFileSelector.enabled = False
+      self.pushTipToRobotCheckBox.enabled = False
+      self.updateScanPlaneCheckBox.enabled = False
+      self.firstVolumeSelector.enabled = False
+      self.secondVolumeSelector.enabled = False
       self.sceneViewButton_red.enabled = False
       self.sceneViewButton_yellow.enabled = False
       self.sceneViewButton_green.enabled = False
       self.connectionSelector.enabled = False
+      self.transformSelector.enabled = False
       connectionDefined = True # Not required
+      transformDefined = True  # Not required      
 
+    # Check if Tracking is enabled
     rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
-    self.startTrackingButton.enabled = rtNodesDefined and connectionDefined and not self.isTrackingOn
+    self.startTrackingButton.enabled = rtNodesDefined and connectionDefined and transformDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
     
   # Get selected scene view for initializing scan plane (PLANE_0)
@@ -412,23 +490,27 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('UI: startTracking()')
     self.isTrackingOn = True
     self.updateButtons()
-    # Get parameters
+    # Store selected parameters
     model = self.modelFileSelector.currentText
-    debugFlag = self.debugFlagCheckBox.checked
-    # Get selected nodes
+    self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
+    self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.firstVolume = self.firstVolumeSelector.currentNode()
     self.secondVolume = self.secondVolumeSelector.currentNode() 
-    self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
-    # Get PLAN_0 translation coordinates
+    self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
+    self.serverNode = self.connectionSelector.currentNode()
+    self.zFrameTransform = self.transformSelector.currentNode()     
+    # Initialize tracking logic
+    self.logic.initializeTracking(model)
+    # Initialize PLAN_0
     if self.updateScanPlane == True:
       center = self.getSelectetViewCenterCoordinates(self.getSelectedView())
-    else:
-      center = (0,0,0) 
-    # Initialize tracking logic
-    self.logic.initializeTracking(model, center)
+      self.logic.initializeScanPlane(center, plane='COR') # Reinitialize PLAN_0 at center position
+    # Initialize zFrame
+    if self.pushTipToRobot == True:
+      self.logic.initializePushTip()
     # Check for needle in the current images
-    self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=debugFlag) 
-    # Create listener to sequence node
+    self.getNeedle() 
+    # Create listener to image sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   def stopTracking(self):
@@ -439,24 +521,25 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.removeObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   def receivedImage(self, caller=None, event=None):
+    self.getNeedle()
+
+  def getNeedle(self):
     # Execute one tracking cycle
     if self.isTrackingOn:
-      # Get parameters
-      self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
-      self.updateScanPlane = self.updateScanPlaneCheckBox.checked
-      self.serverNode = self.connectionSelector.currentNode()
       debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
       confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=debugFlag) 
       if confidence is None:
         print('Tracking failed')
-      elif self.updateScanPlane is True:
-        self.logic.updateScanPlane()
-        self.logic.pushScanPlaneToIGTLink(self.serverNode)
-        print('Tracked with %s confidence: PLAN_0 updated' %confidence)
       else:
         print('Tracked with %s confidence' %confidence)
-      
+        if self.updateScanPlane is True:
+          self.logic.updateScanPlane()
+          self.logic.pushScanPlaneToIGTLink(self.serverNode)
+          print('PLAN_0 updated')
+        if self.pushTipToRobot is True:
+          self.logic.pushTipToIGTLink(self.serverNode, self.zFrameTransform)
+          print('Tip pushed to robot')
     
 ################################################################################################################################################
 # Logic Class
@@ -519,6 +602,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('Debug', 'False')  
     if not parameterNode.GetParameter('UpdateScanPlane'): 
       parameterNode.SetParameter('UpdateScanPlane', 'False')  
+    if not parameterNode.GetParameter('PushTipToRobot'): 
+      parameterNode.SetParameter('PushTipToRobot', 'False')  
     if not parameterNode.GetParameter('Model'): 
       parameterNode.SetParameter('Model', '0')
         
@@ -722,12 +807,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ])  
   
   # Initialize the tracking logic
-  def initializeTracking(self, model, center):
+  def initializeTracking(self, model):
     self.setupUNet(model) # Setup UNet
-    self.initializeScanPlane(center, plane='COR') # Reinitiatilze PLAN_0 at center position
-    self.count = 0                                # Initialize sequence counter
+    self.count = 0        # Initialize sequence counter
   
   def pushScanPlaneToIGTLink(self, connectionNode):
+    #  Push to IGTLink Server
+    connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
+    connectionNode.PushNode(self.scanPlaneTransformNode)
+
+  def pushTipToIGTLink(self, connectionNode, zTransformNode):
+    # Get tip coordinates and transform to zFrame
+
     #  Push to IGTLink Server
     connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
     connectionNode.PushNode(self.scanPlaneTransformNode)
@@ -914,4 +1005,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
     else:
       print('Scan Plane not updated - No confidence on needle tracking')
+    return
+  
+  def initializePushTip(self):
     return
