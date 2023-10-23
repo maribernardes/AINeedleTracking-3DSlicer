@@ -219,7 +219,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.robotConnectionSelector.enabled = False
     optionalFormLayout.addRow('IGTLClient Robot:', self.robotConnectionSelector)
 
-    # Select WorldToZFrame transform
+    # Select zFrameToWorld transform
     self.transformSelector = slicer.qMRMLNodeComboBox()
     self.transformSelector.nodeTypes = ['vtkMRMLLinearTransformNode']
     self.transformSelector.selectNodeUponCreation = True
@@ -256,8 +256,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     targetHBoxLayout.addWidget(self.sendTargetButton)
 
     optionalFormLayout.addRow(targetHBoxLayout)
-
-
     
     ## Needle Tracking                
     ####################################
@@ -741,11 +739,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.targetZNode = slicer.vtkMRMLMarkupsFiducialNode()
         self.targetZNode.SetName('TargetZ')
         self.targetZNode.SetHideFromEditors(True)
-        dispNode = self.targetZNode.GetDisplayNode()
-        if dispNode:
-          dispNode.SetVisibility(False)
         slicer.mrmlScene.AddNode(self.targetZNode)
-
+    displayNode = self.targetZNode.GetDisplayNode()
+    if displayNode:
+      displayNode.SetVisibility(False)
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
