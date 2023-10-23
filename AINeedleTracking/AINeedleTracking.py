@@ -741,6 +741,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.targetZNode = slicer.vtkMRMLMarkupsFiducialNode()
         self.targetZNode.SetName('TargetZ')
         self.targetZNode.SetHideFromEditors(True)
+        dispNode = self.targetZNode.GetDisplayNode()
+        if dispNode:
+          dispNode.SetVisibility(False)
         slicer.mrmlScene.AddNode(self.targetZNode)
 
   # Initialize parameter node with default settings
@@ -1033,6 +1036,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def pushTargetToIGTLink(self, connectionNode, targetNode):
     # Apply zTransform to currentTip
     self.targetZNode.CopyContent(targetNode)
+    dispNode = self.targetZNode.GetDisplayNode()
+    if dispNode:
+      dispNode.SetVisibility(False)
     self.targetZNode.SetAndObserveTransformNodeID(self.worldToZFrameNode.GetID())
     self.targetZNode.HardenTransform()
     #  Push to IGTLink
