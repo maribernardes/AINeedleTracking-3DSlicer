@@ -124,6 +124,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     ####################################
     
     optionalCollapsibleButton = ctk.ctkCollapsibleButton()
+    optionalCollapsibleButton.collapsed = True
     optionalCollapsibleButton.text = 'Optional'
     self.layout.addWidget(optionalCollapsibleButton)
     optionalFormLayout = qt.QFormLayout(optionalCollapsibleButton)
@@ -291,6 +292,17 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumeSelector.setToolTip('Select the phase/imaginary image')
     trackingFormLayout.addRow('Phase/Imaginary: ', self.secondVolumeSelector)
     
+    # Select a segmentation for masking (optional)
+    self.segmentationMaskSelector = slicer.qMRMLNodeComboBox()
+    self.segmentationMaskSelector.nodeTypes = ['vtkMRMLSegmentationNode']
+    self.segmentationMaskSelector.selectNodeUponCreation = True
+    self.segmentationMaskSelector.noneEnabled = True
+    self.segmentationMaskSelector.showChildNodeTypes = False
+    self.segmentationMaskSelector.showHidden = False
+    self.segmentationMaskSelector.setMRMLScene(slicer.mrmlScene)
+    self.segmentationMaskSelector.setToolTip('Select segmentation for masking input images')
+    trackingFormLayout.addRow('Mask (optional): ', self.segmentationMaskSelector)
+    
     # Start/Stop tracking 
     trackingHBoxLayout = qt.QHBoxLayout()    
     self.startTrackingButton = qt.QPushButton('Start Tracking')
@@ -337,6 +349,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.segmentationMaskSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
@@ -450,6 +463,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # self.manualMaskSelector.setCurrentNode(self._parameterNode.GetNodeReference('ManualMaskSegmentation'))
     self.firstVolumeSelector.setCurrentNode(self._parameterNode.GetNodeReference('FirstVolume'))
     self.secondVolumeSelector.setCurrentNode(self._parameterNode.GetNodeReference('SecondVolume'))
+    self.segmentationMaskSelector.setCurrentNode(self._parameterNode.GetNodeReference('Mask'))
     self.inputModeMagPhase.checked = (self._parameterNode.GetParameter('InputMode') == 'MagPhase')
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
@@ -462,6 +476,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.transformSelector.setCurrentNode(self._parameterNode.GetNodeReference('zFrame'))
     self.targetSelector.setCurrentNode(self._parameterNode.GetNodeReference('Target'))
     self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
+    
     # Update buttons states
     self.updateButtons()
     # All the GUI updates are done
@@ -477,6 +492,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # self._parameterNode.SetNodeReferenceID('ManualMaskSegmentation', self.manualMaskSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('FirstVolume', self.firstVolumeSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('SecondVolume', self.secondVolumeSelector.currentNodeID)
+    self._parameterNode.SetNodeReferenceID('Mask', self.segmentationMaskSelector.currentNodeID)
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushScanPlane', 'True' if self.pushScanPlaneCheckBox.checked else 'False')
@@ -508,6 +524,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.pushTargetToRobotCheckBox.enabled = True
       self.firstVolumeSelector.enabled = True
       self.secondVolumeSelector.enabled = True
+      self.segmentationMaskSelector.enabled = True
       # Logic for optional variables selection
       # 1) Push Scan Plane
       if self.pushScanPlaneCheckBox.checked:
@@ -560,6 +577,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.updateScanPlaneCheckBox.enabled = False
       self.firstVolumeSelector.enabled = False
       self.secondVolumeSelector.enabled = False
+      self.segmentationMaskSelector.enabled = False
       self.sceneViewButton_red.enabled = False
       self.sceneViewButton_yellow.enabled = False
       self.sceneViewButton_green.enabled = False
@@ -604,23 +622,24 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.firstVolume = self.firstVolumeSelector.currentNode()
     self.secondVolume = self.secondVolumeSelector.currentNode() 
+    self.segmentationNode = self.segmentationMaskSelector.currentNode()
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     self.clientNode = self.robotConnectionSelector.currentNode()
     self.zFrameTransform = self.transformSelector.currentNode()
     # Initialize tracking logic
-    self.logic.initializeTracking(model)
-    # Initialize PLAN_0
-    if self.updateScanPlane == True:
-      viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
-      self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
-    # Initialize zFrame transform
-    if self.pushTipToRobot == True:
-      self.logic.initializeZFrame(self.zFrameTransform)
-    # Check for needle in the current images
-    self.getNeedle() 
-    # Create listener to image sequence node
+    self.logic.initializeTracking(model, self.segmentationNode, self.firstVolume)
+    # # Initialize PLAN_0
+    # if self.updateScanPlane == True:
+    #   viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
+    #   self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
+    # # Initialize zFrame transform
+    # if self.pushTipToRobot == True:
+    #   self.logic.initializeZFrame(self.zFrameTransform)
+    # # Check for needle in the current images
+    # self.getNeedle() 
+    # # Create listener to image sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   def stopTracking(self):
@@ -686,7 +705,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.path = os.path.dirname(os.path.abspath(__file__))
     self.debug_path = os.path.join(self.path,'Debug')
     self.fileWriter = sitk.ImageFileWriter()
-
+    
+    # Input image masking
+    self.maskFilter = sitk.LabelMapMaskImageFilter()
+    self.maskFilter.SetBackgroundValue(0)
+    self.maskFilter.SetNegated(False)
+    self.sitk_mask = None
+    
     # Used for saving data from experiments
     self.count = None
 
@@ -698,7 +723,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         # self.scanPlaneTransformNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.scanPlaneTransformNode)
     self.initializeScanPlane(plane='COR')
-    # Check if labelmap node exists, if not, create a new one
+    # Check if needle labelmap node exists, if not, create a new one
     self.needleLabelMapNode = slicer.util.getFirstNodeByName('NeedleLabelMap')
     if self.needleLabelMapNode is None or self.needleLabelMapNode.GetClassName() != 'vtkMRMLLabelMapVolumeNode':
         self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
@@ -875,37 +900,22 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_phase = self.numpyToitk(numpy_phase, sitk_real)
     return (sitk_magn, sitk_phase)
 
-  # Return blank itk Image with same information from reference volume
-  # Optionals: choose different pixelValue, type (pixel ID)
-  # This is a simplified version from the Util.py method. Does NOT choose from different direction (and center image at the reference volume)
-  def createBlankItk(sitkReference, type=None, pixelValue=0, spacing=None):
-      image = sitk.Image(sitkReference.GetSize(), sitk.sitkUInt8)
-      if (pixelValue != 0):
-          image = pixelValue*sitk.Not(image)
-      if (type is None):
-          image = sitk.Cast(image, sitkReference.GetPixelID())
-      else:
-          image = sitk.Cast(image, type)  
-      image.CopyInformation(sitkReference)
-      if (spacing is not None):
-          image.SetSpacing(spacing)                 # Set spacing
-      return image
-
-  # def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
-  #   if segmentationNode is None:
-  #     sitk_reference = sitkUtils.PullVolumeFromSlicer(referenceVolumeNode)
-  #     sitk_mask = self.createBlankItk(sitk_reference, sitk.sitkUInt8)
-  #     return sitk.Not(sitk_mask)
-  #   labelmapVolumeNode = slicer.util.getFirstNodeByName('mask_labelmap')
-  #   if labelmapVolumeNode is None or labelmapVolumeNode.GetClassName() != 'vtkMRMLLabelMapVolumeNode':      
-  #     labelmapVolumeNode = slicer.vtkMRMLLabelMapVolumeNode()
-  #     slicer.mrmlScene.AddNode(labelmapVolumeNode)
-  #     labelmapVolumeNode.SetName('mask_labelmap')
-  #   slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, labelmapVolumeNode, referenceVolumeNode)
-  #   sitk_mask = sitkUtils.PullVolumeFromSlicer(labelmapVolumeNode)
-  #   sitk_mask  = sitk.Cast(sitk_mask, sitk.sitkFloat32)
-  #   return sitk_mask
-
+  # Build a sitk mask volume from a segmentation node
+  def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
+    if segmentationNode is not None:
+      # Create a temporary labelmap node
+      maskLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
+      slicer.mrmlScene.AddNode(maskLabelMapNode)
+      # Create mask from segmentation
+      slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, maskLabelMapNode, referenceVolumeNode)
+      sitk_mask = sitkUtils.PullVolumeFromSlicer(maskLabelMapNode)
+      # Remove temporary labelmap node
+      slicer.mrmlScene.RemoveNode(maskLabelMapNode)
+      # Cast to valid type to be used with sitkMaskFilter
+      return sitk.Cast(sitk_mask, sitk.sitkLabelUInt8)
+    else:
+      return None
+  
   def setupUNet(self, model, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
     # Setup UNet model
     model_file= os.path.join(self.path, 'Models', model)
@@ -960,9 +970,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ])  
   
   # Initialize the tracking logic
-  def initializeTracking(self, model):
+  def initializeTracking(self, model, segmentationNode, firstVolume):
     self.setupUNet(model) # Setup UNet
     self.count = 0        # Initialize sequence counter
+    self.sitk_mask = self.getMaskFromSegmentation(segmentationNode, firstVolume)    # Update mask (None if nothing in segmentationNode)
 
   def initializeZFrame(self, zFrameToWorld):
     # Get world to ZFrame transformations
@@ -1003,7 +1014,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     m.SetElement(2, 3, position[2])
     self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
 
-  def updateScanPlane(self, checkConfidence=True):
+  def updateScanPlane(self, checkConfidence=True, plane='COR', sliceOnly=True):
     if checkConfidence:
       confidentUpdate = self.needleConfidenceNode.GetText() != 'None'
     else:
@@ -1016,9 +1027,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       tip_matrix = vtk.vtkMatrix4x4()
       self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
       # Update transform with current tip
-      plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
-      plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
-      plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
+      if not sliceOnly: # Update all coordinates
+          plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
+          plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
+          plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))      
+      else:             # Update only slice coordinate
+        if plane == 'SAG':
+          plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
+        elif plane == 'COR':
+          plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
+        elif plane == 'AX':
+          plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
       self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
     else:
       print('Scan Plane not updated - No confidence on needle tracking')
@@ -1072,6 +1091,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
+    # Apply segmentation mask (optional)
+    if self.sitk_mask is not None:
+      self.sitk_mask.SetOrigin(sitk_img_m.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
+      sitk_img_m = self.maskFilter.Execute(self.sitk_mask, sitk_img_m)  # Apply mask
+      sitk_img_p = self.maskFilter.Execute(self.sitk_mask, sitk_img_p)  # Apply mask
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag=debugFlag)
