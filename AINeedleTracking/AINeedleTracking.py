@@ -630,16 +630,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.zFrameTransform = self.transformSelector.currentNode()
     # Initialize tracking logic
     self.logic.initializeTracking(model, self.segmentationNode, self.firstVolume)
-    # # Initialize PLAN_0
-    # if self.updateScanPlane == True:
-    #   viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
-    #   self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
-    # # Initialize zFrame transform
-    # if self.pushTipToRobot == True:
-    #   self.logic.initializeZFrame(self.zFrameTransform)
-    # # Check for needle in the current images
-    # self.getNeedle() 
-    # # Create listener to image sequence node
+    # Initialize PLAN_0
+    if self.updateScanPlane == True:
+      viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
+      self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
+    # Initialize zFrame transform
+    if self.pushTipToRobot == True:
+      self.logic.initializeZFrame(self.zFrameTransform)
+    # Check for needle in the current images
+    self.getNeedle() 
+    # Create listener to image sequence node
     self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   def stopTracking(self):
@@ -1102,6 +1102,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag=debugFlag)
       self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug'))
       self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+      if self.sitk_mask is not None:
+        sitk_mask = sitk.Cast(self.sitk_mask, sitk.sitkUInt8)
+        self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask', debugFlag=debugFlag)
+        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+        
 
     ######################################
     ##                                  ##
@@ -1138,7 +1143,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
-    ## Step 2: Get coordinates for tip  ##
+    ## Step 2: Get segmentations        ##
     ##                                  ##
     ######################################
 
@@ -1148,13 +1153,20 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     center = None
     shaft_tip = None
-    # Try to get tip estimate from tip segmentation
+    
+    ######################################
+    ##                                  ##
+    ## Step 3: Define tip labels        ##
+    ##                                  ##
+    ######################################    
+    
+    # Try to select tip from segmentation
     if sitk.GetArrayFromImage(sitk_tip).sum() > 0:
-      # Get blobs from segmentation
+      # Get labels from segmentation
       stats = sitk.LabelShapeStatisticsImageFilter()
       stats.SetComputeFeretDiameter(True)
       stats.Execute(sitk.ConnectedComponent(sitk_tip))
-      # Get blobs sizes and centroid physical coordinates
+      # Get labels sizes and centroid physical coordinates
       labels_size = []
       labels_centroid = []
       labels_max_radius = []
@@ -1163,30 +1175,77 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         centroid = stats.GetCentroid(l)
         max_radius = stats.GetFeretDiameter(l)
         if debugFlag:
-          print('Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
+          print('Tip Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
         labels_size.append(number_pixels)
         labels_centroid.append(centroid)    
         labels_max_radius.append(max_radius)
       # Get tip estimate position
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
+      print('Selected tip = %s' %str(index_largest+1))
       center = labels_centroid[index_largest]             # Get the largest centroid center
       max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
-    # Try to get tip estimate from shaft segmentation
+    
+    ######################################
+    ##                                  ##
+    ## Step 4: Define shaft label       ##
+    ##                                  ##
+    ######################################        
+    
+    # Try to select shaft from segmentation
     if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
-      sitk_skeleton = sitk.BinaryThinning(sitk_shaft)
+      # Get labels from segmentation
+      stats = sitk.LabelShapeStatisticsImageFilter()
+      stats.SetComputeFeretDiameter(True)
+      
+      # TODO: Check need for BinaryClosingByReconstructionImageFilter
+      # SetKernelRadius([x,y,z])
+      # SetFullyConnected(True) # Test
+      
+      sitk_shaft_labeled = sitk.ConnectedComponent(sitk_shaft)
+      stats.Execute(sitk_shaft_labeled)
+      # Get labels sizes and centroid physical coordinates
+      labels_size = []
+      labels_centroid = []
+      labels_max_radius = []
+      labels = stats.GetLabels()
+      for l in labels:
+        number_pixels = stats.GetNumberOfPixels(l)
+        centroid = stats.GetCentroid(l)
+        max_radius = stats.GetFeretDiameter(l)
+        if debugFlag:
+          print('Shaft Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
+        labels_size.append(number_pixels)
+        labels_centroid.append(centroid)    
+        labels_max_radius.append(max_radius)
+      
+      # Get the largest shaft
+      index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
+      label = labels[index_largest]
+      # Create a binary mask for the specific label
+      sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_labeled, lowerThreshold=label, upperThreshold=label)
+      # Create a skeleton
+      sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
       shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
       # shaft_direction = self.getShaftDirection()
 
 
     ######################################
     ##                                  ##
-    ## Step 3: Set confidence for tip   ##
+    ## Step 5: Select tip and shaft     ##
+    ##                                  ##
+    ######################################    
+    
+    #TODO: Define best tip/shaft combination from labels
+
+    ######################################
+    ##                                  ##
+    ## Step 6: Set confidence for tip   ##
     ##                                  ##
     ######################################
 
     # Define confidence on tip estimate
     if center is None:
-      center = shaft_tip                            # Use shaft tip (no tip segmentation)
+      center = shaft_tip      # Use shaft tip (no tip segmentation)
       confidence = 'Low'      # Set estimate as low (no tip segmentation, just shaft)
     elif shaft_tip is None:
       confidence = 'Medium'   # Set estimate as medium (use tip, no shaft segmentation available)
@@ -1204,7 +1263,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     ####################################
     ##                                ##
-    ## Step 4: Push to tipTrackedNode ##
+    ## Step 7: Push to tipTrackedNode ##
     ##                                ##
     ####################################
 
