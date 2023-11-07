@@ -1091,11 +1091,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
-    # Apply segmentation mask (optional)
-    if self.sitk_mask is not None:
-      self.sitk_mask.SetOrigin(sitk_img_m.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
-      sitk_img_m = self.maskFilter.Execute(self.sitk_mask, sitk_img_m)  # Apply mask
-      sitk_img_p = self.maskFilter.Execute(self.sitk_mask, sitk_img_p)  # Apply mask
+    
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag=debugFlag)
@@ -1147,10 +1143,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################
 
+    # Apply segmentation mask (optional)
+    if self.sitk_mask is not None:
+      self.sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
+      sitk_output = self.maskFilter.Execute(self.sitk_mask, sitk_output) # Apply mask to labels
+
     # Separate labels
     sitk_tip = (sitk_output==2)
     sitk_shaft = (sitk_output==1)
-
+    
     center = None
     shaft_tip = None
     
@@ -1164,27 +1165,31 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if sitk.GetArrayFromImage(sitk_tip).sum() > 0:
       # Get labels from segmentation
       stats = sitk.LabelShapeStatisticsImageFilter()
-      stats.SetComputeFeretDiameter(True)
+      # TODO: With fewer false positives, check if really necessary to compute the radius to check shaft pairing
+      # stats.SetComputeFeretDiameter(True)
       stats.Execute(sitk.ConnectedComponent(sitk_tip))
       # Get labels sizes and centroid physical coordinates
       labels_size = []
       labels_centroid = []
-      labels_max_radius = []
+      # labels_max_radius = []
       for l in stats.GetLabels():
         number_pixels = stats.GetNumberOfPixels(l)
         centroid = stats.GetCentroid(l)
-        max_radius = stats.GetFeretDiameter(l)
+        # max_radius = stats.GetFeretDiameter(l)
         if debugFlag:
-          print('Tip Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
+          print('Tip Label %s: -> Size: %s, Center: %s' %(l, number_pixels, centroid))
+          # print('Tip Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
         labels_size.append(number_pixels)
         labels_centroid.append(centroid)    
-        labels_max_radius.append(max_radius)
+        # labels_max_radius.append(max_radius)
       # Get tip estimate position
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
-      print('Selected tip = %s' %str(index_largest+1))
+      if debugFlag:
+        print('Selected tip = %s' %str(index_largest+1))
       center = labels_centroid[index_largest]             # Get the largest centroid center
-      max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
-    
+      # max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
+      max_distance = 15
+      
     ######################################
     ##                                  ##
     ## Step 4: Define shaft label       ##
@@ -1195,9 +1200,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if sitk.GetArrayFromImage(sitk_shaft).sum() > 0:
       # Get labels from segmentation
       stats = sitk.LabelShapeStatisticsImageFilter()
-      stats.SetComputeFeretDiameter(True)
+      # TODO: Use oriented bounding box instead of skeleton for getting the shaft limit points (and needle orientation)
+      # stats.SetComputeFeretDiameter(True)
+      # stats.SetComputeOrientedBoundingBox(True)
       
-      # TODO: Check need for BinaryClosingByReconstructionImageFilter
+      # TODO: If shaft is constantly broke: Check need for BinaryClosingByReconstructionImageFilter
+      # Looks like it won't be necessary with new model
       # SetKernelRadius([x,y,z])
       # SetFullyConnected(True) # Test
       
@@ -1206,17 +1214,22 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Get labels sizes and centroid physical coordinates
       labels_size = []
       labels_centroid = []
-      labels_max_radius = []
+      # labels_max_radius = []
       labels = stats.GetLabels()
       for l in labels:
         number_pixels = stats.GetNumberOfPixels(l)
         centroid = stats.GetCentroid(l)
-        max_radius = stats.GetFeretDiameter(l)
+        # max_radius = stats.GetFeretDiameter(l)
+        # obb = stats.GetOrientedBoundingBoxVertices(l)
+        # obb_dir = stats.GetOrientedBoundingBoxDirection(l)
+        # obb_center = stats.GetOrientedBoundingBoxOrigin(l)
+        # obb_size = stats.GetOrientedBoundingBoxSize(l)
         if debugFlag:
-          print('Shaft Label %s: -> Size: %s, Center: %s, Max Radius: %s' %(l, number_pixels, centroid, max_radius))
+          print('Shaft Label %s: -> Size: %s, Center: %s' %(l, number_pixels, centroid)) 
+          # print('Bounding box %s: -> Direction: %s, Center: %s, Size: %s' %(l, obb_dir, obb_center, obb_size))
         labels_size.append(number_pixels)
         labels_centroid.append(centroid)    
-        labels_max_radius.append(max_radius)
+        # labels_max_radius.append(max_radius)
       
       # Get the largest shaft
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
