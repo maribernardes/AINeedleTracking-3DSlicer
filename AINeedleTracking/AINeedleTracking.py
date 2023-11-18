@@ -962,7 +962,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         nearest_interp=False,
         to_tensor=True,
       ),
-      Activationsd(keys="pred", sigmoid=True),
       AsDiscreted(keys="pred", argmax=True, num_classes=3),
       # RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=True),
       # KeepLargestConnectedComponentd(keys="pred", independent=True),
