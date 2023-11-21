@@ -726,9 +726,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Check if needle labelmap node exists, if not, create a new one
     self.needleLabelMapNode = slicer.util.getFirstNodeByName('NeedleLabelMap')
     if self.needleLabelMapNode is None or self.needleLabelMapNode.GetClassName() != 'vtkMRMLLabelMapVolumeNode':
-        self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
-        self.needleLabelMapNode.SetName('NeedleLabelMap')
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
+        self.needleLabelMapNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'NeedleLabelMap') # Franklin fix
+        # self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
+        # self.needleLabelMapNode.SetName('NeedleLabelMap')
+        # slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         colorTableNode = self.createColorTable()
         self.needleLabelMapNode.CreateDefaultDisplayNodes()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
