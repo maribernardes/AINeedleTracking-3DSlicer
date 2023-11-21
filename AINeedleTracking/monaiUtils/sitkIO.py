@@ -333,17 +333,17 @@ class PushSitkImage(Transform):
         self.write_kwargs = {"verbose": print_log}
         self.writer = sitkWriter(**self.init_kwargs)
         
-    # # Probably not needed
-    # def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
-    #     if init_kwargs is not None:
-    #         self.init_kwargs.update(init_kwargs)
-    #     if data_kwargs is not None:
-    #         self.data_kwargs.update(data_kwargs)
-    #     if meta_kwargs is not None:
-    #         self.meta_kwargs.update(meta_kwargs)
-    #     if write_kwargs is not None:
-    #         self.write_kwargs.update(write_kwargs)
-    #     return self
+    # Probably not needed
+    def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
+        if init_kwargs is not None:
+            self.init_kwargs.update(init_kwargs)
+        if data_kwargs is not None:
+            self.data_kwargs.update(data_kwargs)
+        if meta_kwargs is not None:
+            self.meta_kwargs.update(meta_kwargs)
+        if write_kwargs is not None:
+            self.write_kwargs.update(write_kwargs)
+        return self
         
     def __call__(self, img: torch.Tensor or np.ndarray, meta_data: dict or None = None):
         meta_data = img.meta if isinstance(img, MetaTensor) else meta_data
@@ -391,10 +391,10 @@ class PushSitkImaged(MapTransform):
             print_log=print_log,
         )
 
-    # # Probably not needed
-    # def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
-    #     self.saver.set_options(init_kwargs, data_kwargs, meta_kwargs, write_kwargs)
-    #     return self
+    # Probably not needed
+    def set_options(self, init_kwargs=None, data_kwargs=None, meta_kwargs=None, write_kwargs=None):
+        self.saver.set_options(init_kwargs, data_kwargs, meta_kwargs, write_kwargs)
+        return self
 
     def __call__(self, data):
         d = dict(data)
