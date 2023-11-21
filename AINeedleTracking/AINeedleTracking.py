@@ -8,7 +8,6 @@ from slicer.util import VTKObservationMixin
 import SimpleITK as sitk
 import sitkUtils
 import numpy as np
-from skimage.restoration import unwrap_phase
 
 from math import sqrt, pow
 
