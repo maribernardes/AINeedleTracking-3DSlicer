@@ -751,7 +751,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.pushTipToRobot is True:
           self.logic.pushTipToIGTLink(self.clientNode)
           print('Tip pushed to robot')
-    
+      print('____________________')
 ################################################################################################################################################
 # Logic Class
 ################################################################################################################################################
@@ -775,6 +775,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     # Used for saving data from experiments
     self.count = None
+    self.tipDetected = False
 
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByName('PLANE_0')
@@ -800,6 +801,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleConfidenceNode = slicer.vtkMRMLTextNode()
         self.needleConfidenceNode.SetName('CurrentTipConfidence')
         slicer.mrmlScene.AddNode(self.needleConfidenceNode)
+    # Check if segmented tip node exists, if not, create a new one
+    self.tipSegmNode = slicer.util.getFirstNodeByName('SegmentedTipTransform')
+    if self.tipSegmNode is None or self.tipSegmNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+        self.tipSegmNode = slicer.vtkMRMLLinearTransformNode()
+        self.tipSegmNode.SetName('SegmentedTipTransform')
+        slicer.mrmlScene.AddNode(self.tipSegmNode)
     # Check if tracked tip node exists, if not, create a new one
     self.tipTrackedNode = slicer.util.getFirstNodeByName('CurrentTrackedTipTransform')
     if self.tipTrackedNode is None or self.tipTrackedNode.GetClassName() != 'vtkMRMLLinearTransformNode':
@@ -1056,7 +1063,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def initializeTracking(self, inputVolume, modelName, segmentationNode, firstVolume):
     modelFilePath = os.path.join(self.path, 'Models', inputVolume, modelName)
     self.setupUNet(inputVolume, modelFilePath) # Setup UNet
-    self.count = 0        # Initialize sequence counter
+    self.count = 0              # Initialize sequence counter
+    # Reset tip transform nodes
+    identityMatrix = vtk.vtkMatrix4x4()
+    identityMatrix.Identity()
+    self.tipSegmNode.SetMatrixTransformToParent(identityMatrix)    
+    self.tipTrackedNode.SetMatrixTransformToParent(identityMatrix)    
+    self.tipDetected = False    # Zero tip detection
     self.sitk_mask = self.getMaskFromSegmentation(segmentationNode, firstVolume)    # Update mask (None if nothing in segmentationNode)
 
   def initializeZFrame(self, zFrameToWorld):
@@ -1374,7 +1387,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     ####################################
     ##                                ##
-    ## Step 7: Push to tipTrackedNode ##
+    ## Step 7: Update  tipSegmNode    ##
     ##                                ##
     ####################################
 
@@ -1390,7 +1403,41 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     transformMatrix.SetElement(0,3, centerRAS[0])
     transformMatrix.SetElement(1,3, centerRAS[1])
     transformMatrix.SetElement(2,3, centerRAS[2])
-    self.tipTrackedNode.SetMatrixTransformToParent(transformMatrix)
+    self.tipSegmNode.SetMatrixTransformToParent(transformMatrix)
+
+    ####################################
+    ##                                ##
+    ## Step 8: Push to tipTrackedNode ##
+    ##                                ##
+    ####################################
+
+    if (confidence == 'High') or (confidence == 'Medium'):
+      # Get current tip transform
+      tip_matrix = vtk.vtkMatrix4x4()
+      self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
+      if plane == 'COR':
+      # Update tracked tip L/R and I/S coordinates
+        tip_matrix.SetElement(0,3, centerRAS[0])
+        tip_matrix.SetElement(2,3, centerRAS[2])
+        if self.tipDetected == False:
+          tip_matrix.SetElement(1,3, centerRAS[1])
+      elif plane == 'SAG':
+      # Update tracked tip A/P and I/S coordinates
+        tip_matrix.SetElement(1,3, centerRAS[1])
+        tip_matrix.SetElement(2,3, centerRAS[2])      
+        if self.tipDetected == False:
+          tip_matrix.SetElement(0,3, centerRAS[0])
+      elif plane == 'AX':
+      # Update tracked tip L/R and A/P coordinates
+        tip_matrix.SetElement(0,3, centerRAS[0])
+        tip_matrix.SetElement(1,3, centerRAS[1])      
+        if self.tipDetected == False:
+          tip_matrix.SetElement(2,3, centerRAS[2])
+      self.tipDetected = True
+      self.tipTrackedNode.SetMatrixTransformToParent(tip_matrix)
+      if debugFlag:
+        tracked = (tip_matrix.GetElement(0,3), tip_matrix.GetElement(1,3), tip_matrix.GetElement(2,3))
+        print('Tracked coordinates: ' + str(tracked))
 
     # Push confidence to Node
     self.needleConfidenceNode.SetText(confidence) 
