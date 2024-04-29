@@ -45,7 +45,7 @@ class sitkReader(ImageReader):
     def verify_suffix(self, img) -> bool:
         return True
     
-    def get_data(self, img) -> Tuple[np.ndarray, Dict]:  #tuple[np.ndarray, dict]:
+    def get_data(self, img) -> Tuple[np.ndarray, Dict]:
         img_array: list[np.ndarray] = []
         compatible_meta: dict = {}
         data = self._get_array_data(img)

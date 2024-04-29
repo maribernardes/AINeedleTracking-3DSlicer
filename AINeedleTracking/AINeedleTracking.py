@@ -100,23 +100,35 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.layout.addWidget(setupCollapsibleButton)
     setupFormLayout = qt.QFormLayout(setupCollapsibleButton)
     
-    # Input mode
-    self.inputModeMagPhase = qt.QRadioButton('Magnitude/Phase')
-    self.inputModeRealImag = qt.QRadioButton('Real/Imaginary')
+    # Input configuration
+    self.inputModeMagPhase = qt.QRadioButton('Mag/Phase')
+    self.inputModeRealImag = qt.QRadioButton('Real/Imag')
     self.inputModeMagPhase.checked = 1
     self.inputModeButtonGroup = qt.QButtonGroup()
     self.inputModeButtonGroup.addButton(self.inputModeMagPhase)
     self.inputModeButtonGroup.addButton(self.inputModeRealImag)
-    inputModeHBoxLayout = qt.QHBoxLayout()
-    inputModeHBoxLayout.addWidget(self.inputModeMagPhase)
-    inputModeHBoxLayout.addWidget(self.inputModeRealImag)
-    setupFormLayout.addRow('Input Mode:',inputModeHBoxLayout)
+    inputHBoxLayout = qt.QHBoxLayout()
+    inputHBoxLayout.addWidget(qt.QLabel('Input Mode:'))
+    inputHBoxLayout.addWidget(self.inputModeMagPhase)
+    inputHBoxLayout.addWidget(self.inputModeRealImag)
+    hSpacer = qt.QWidget()
+    hSpacer.setFixedWidth(70)
+    inputHBoxLayout.addWidget(hSpacer)
+    self.inputVolume2D = qt.QRadioButton('2D')
+    self.inputVolume3D = qt.QRadioButton('3D')
+    self.inputVolume2D.checked = 1
+    self.inputVolumeButtonGroup = qt.QButtonGroup()
+    self.inputVolumeButtonGroup.addButton(self.inputVolume2D)
+    self.inputVolumeButtonGroup.addButton(self.inputVolume3D)
+    inputHBoxLayout.addWidget(qt.QLabel('Input Volume:'))
+    inputHBoxLayout.addWidget(self.inputVolume2D)
+    inputHBoxLayout.addWidget(self.inputVolume3D)
+    setupFormLayout.addRow(inputHBoxLayout)
     
     # AI model
     self.modelFileSelector = qt.QComboBox()
-    modelPath= os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Models')
-    self.modelList = [f for f in os.listdir(modelPath) if os.path.isfile(os.path.join(modelPath, f))]
-    self.modelFileSelector.addItems(self.modelList)
+    self.modelPath= os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Models')
+    self.updateModelList()
     setupFormLayout.addRow('AI Model:',self.modelFileSelector)
 
     ## Optional                
@@ -171,30 +183,56 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     optionalFormLayout.addRow('IGTLServer MRI:', self.bridgeConnectionSelector)
 
     # Select which scene view to initialize PLAN_0 and send to scanner
-    planeHBoxLayout = qt.QHBoxLayout()
-    self.sceneViewButton_red = qt.QRadioButton('Red')
-    self.sceneViewButton_yellow = qt.QRadioButton('Yellow')
-    self.sceneViewButton_green = qt.QRadioButton('Green')
-    self.sceneViewButton_green.checked = 1
-    self.sceneViewButtonGroup = qt.QButtonGroup()
-    self.sceneViewButtonGroup.addButton(self.sceneViewButton_red)
-    self.sceneViewButtonGroup.addButton(self.sceneViewButton_yellow)
-    self.sceneViewButtonGroup.addButton(self.sceneViewButton_green)
-    self.sceneViewButton_red.enabled = False
-    self.sceneViewButton_yellow.enabled = False
-    self.sceneViewButton_green.enabled = False
-    sliceLabel = qt.QLabel('Inital scan plane:')
-    sliceLabel.setToolTip('Select initial slice position for scan plane')
-    planeHBoxLayout.addWidget(sliceLabel)
-    planeHBoxLayout.addWidget(self.sceneViewButton_red)
-    planeHBoxLayout.addWidget(self.sceneViewButton_yellow)
-    planeHBoxLayout.addWidget(self.sceneViewButton_green)
-    self.sendPlaneButton = qt.QPushButton('Set Initial Scan Plane')
-    self.sendPlaneButton.toolTip = 'Send scan plane to scanner'
-    self.sendPlaneButton.setFixedWidth(170)
-    self.sendPlaneButton.enabled = False
-    planeHBoxLayout.addWidget(self.sendPlaneButton)
-    optionalFormLayout.addRow(planeHBoxLayout)   
+    plane0HBoxLayout = qt.QHBoxLayout()
+    self.scenePlane0Button_red = qt.QRadioButton('Red')
+    self.scenePlane0Button_yellow = qt.QRadioButton('Yellow')
+    self.scenePlane0Button_green = qt.QRadioButton('Green')
+    self.scenePlane0Button_green.checked = 1
+    self.scenePlane0ButtonGroup = qt.QButtonGroup()
+    self.scenePlane0ButtonGroup.addButton(self.scenePlane0Button_red)
+    self.scenePlane0ButtonGroup.addButton(self.scenePlane0Button_yellow)
+    self.scenePlane0ButtonGroup.addButton(self.scenePlane0Button_green)
+    self.scenePlane0Button_red.enabled = False
+    self.scenePlane0Button_yellow.enabled = False
+    self.scenePlane0Button_green.enabled = False
+    slice0Label = qt.QLabel('Inital PLANE_0:')
+    slice0Label.setToolTip('Select initial slice position for scan plane 0')
+    plane0HBoxLayout.addWidget(slice0Label)
+    plane0HBoxLayout.addWidget(self.scenePlane0Button_red)
+    plane0HBoxLayout.addWidget(self.scenePlane0Button_yellow)
+    plane0HBoxLayout.addWidget(self.scenePlane0Button_green)
+    self.sendPlane0Button = qt.QPushButton('Set Initial PLANE_0')
+    self.sendPlane0Button.toolTip = 'Send scan plane 0 to scanner'
+    self.sendPlane0Button.setFixedWidth(170)
+    self.sendPlane0Button.enabled = False
+    plane0HBoxLayout.addWidget(self.sendPlane0Button)
+    optionalFormLayout.addRow(plane0HBoxLayout)   
+ 
+    # Select which scene view to initialize PLAN_1 and send to scanner
+    plane1HBoxLayout = qt.QHBoxLayout()
+    self.scenePlane1Button_red = qt.QRadioButton('Red')
+    self.scenePlane1Button_yellow = qt.QRadioButton('Yellow')
+    self.scenePlane1Button_green = qt.QRadioButton('Green')
+    self.scenePlane1Button_green.checked = 1
+    self.scenePlane1ButtonGroup = qt.QButtonGroup()
+    self.scenePlane1ButtonGroup.addButton(self.scenePlane1Button_red)
+    self.scenePlane1ButtonGroup.addButton(self.scenePlane1Button_yellow)
+    self.scenePlane1ButtonGroup.addButton(self.scenePlane1Button_green)
+    self.scenePlane1Button_red.enabled = False
+    self.scenePlane1Button_yellow.enabled = False
+    self.scenePlane1Button_green.enabled = False
+    slice1Label = qt.QLabel('Inital PLANE_1:')
+    slice1Label.setToolTip('Select initial slice position for scan plane 0')
+    plane1HBoxLayout.addWidget(slice1Label)
+    plane1HBoxLayout.addWidget(self.scenePlane1Button_red)
+    plane1HBoxLayout.addWidget(self.scenePlane1Button_yellow)
+    plane1HBoxLayout.addWidget(self.scenePlane1Button_green)
+    self.sendPlane1Button = qt.QPushButton('Set Initial PLANE_1')
+    self.sendPlane1Button.toolTip = 'Send scan plane 0 to scanner'
+    self.sendPlane1Button.setFixedWidth(170)
+    self.sendPlane1Button.enabled = False
+    plane1HBoxLayout.addWidget(self.sendPlane1Button)
+    optionalFormLayout.addRow(plane1HBoxLayout)   
 
     # UpdateScanPlan mode check box (output images at intermediate steps)
     self.updateScanPlaneCheckBox = qt.QCheckBox()
@@ -346,6 +384,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # (in the selected parameter node).
     self.inputModeMagPhase.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputModeRealImag.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.inputVolume2D.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.inputVolume3D.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.segmentationMaskSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
@@ -353,9 +393,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushTargetToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.sceneViewButton_red.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.sceneViewButton_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.sceneViewButton_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.scenePlane0Button_red.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.scenePlane0Button_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.scenePlane0Button_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.bridgeConnectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.robotConnectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
@@ -366,8 +406,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Connect UI buttons to event calls
     self.startTrackingButton.connect('clicked(bool)', self.startTracking)
     self.stopTrackingButton.connect('clicked(bool)', self.stopTracking)
-    self.sendPlaneButton.connect('clicked(bool)', self.sendPlane)
+    self.sendPlane0Button.connect('clicked(bool)', self.sendPlane)
     self.sendTargetButton.connect('clicked(bool)', self.sendTarget)
+    
+    self.inputVolume2D.connect("toggled(bool)", self.updateModelList)
+    self.inputVolume3D.connect("toggled(bool)", self.updateModelList)
     
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateButtons)
@@ -383,6 +426,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Internal variables
     self.isTrackingOn = False
     self.inputMode = None
+    self.inputVolume = None
     self.firstVolume = None
     self.secondVolume = None
     self.debugFlag = None
@@ -465,6 +509,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.segmentationMaskSelector.setCurrentNode(self._parameterNode.GetNodeReference('Mask'))
     self.inputModeMagPhase.checked = (self._parameterNode.GetParameter('InputMode') == 'MagPhase')
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
+    self.inputVolume2D.checked = (self._parameterNode.GetParameter('InputVolume') == '2D')
+    self.inputVolume3D.checked = (self._parameterNode.GetParameter('InputVolume') == '3D')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.pushScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('PushScanPlane') == 'True')
     self.pushTipToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTipToRobot') == 'True')
@@ -493,6 +539,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('SecondVolume', self.secondVolumeSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('Mask', self.segmentationMaskSelector.currentNodeID)
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
+    self._parameterNode.SetParameter('InputVolume', '2D' if self.inputVolume2D.checked else '3D')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushScanPlane', 'True' if self.pushScanPlaneCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushTipToRobot', 'True' if self.pushTipToRobotCheckBox.checked else 'False')
@@ -517,6 +564,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # Logic for required variables selection: 
       self.inputModeMagPhase.enabled = True
       self.inputModeRealImag.enabled = True
+      self.inputVolume2D.enabled = True
+      self.inputVolume3D.enabled = True
       self.modelFileSelector.enabled = True
       self.pushScanPlaneCheckBox.enabled = True
       self.pushTipToRobotCheckBox.enabled = True
@@ -528,22 +577,22 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # 1) Push Scan Plane
       if self.pushScanPlaneCheckBox.checked:
         self.updateScanPlaneCheckBox.enabled = True
-        self.sceneViewButton_red.enabled = True
-        self.sceneViewButton_yellow.enabled = True
-        self.sceneViewButton_green.enabled = True    
+        self.scenePlane0Button_red.enabled = True
+        self.scenePlane0Button_yellow.enabled = True
+        self.scenePlane0Button_green.enabled = True    
         self.bridgeConnectionSelector.enabled = True
         serverDefined = self.bridgeConnectionSelector.currentNode()
         if serverDefined:
-          self.sendPlaneButton.enabled = True
+          self.sendPlane0Button.enabled = True
         else:
-          self.sendPlaneButton.enabled = False
+          self.sendPlane0Button.enabled = False
       else:
         self.updateScanPlaneCheckBox.enabled = False
-        self.sceneViewButton_red.enabled = False
-        self.sceneViewButton_yellow.enabled = False
-        self.sceneViewButton_green.enabled = False
+        self.scenePlane0Button_red.enabled = False
+        self.scenePlane0Button_yellow.enabled = False
+        self.scenePlane0Button_green.enabled = False
         self.bridgeConnectionSelector.enabled = False
-        self.sendPlaneButton.enabled = False
+        self.sendPlane0Button.enabled = False
       # 2) Push target and tip (required for both)
       if self.pushTipToRobotCheckBox.checked or self.pushTargetToRobotCheckBox.checked:
         self.robotConnectionSelector.enabled = True
@@ -568,18 +617,20 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     else:
       self.inputModeMagPhase.enabled = False
       self.inputModeRealImag.enabled = False
+      self.inputVolume2D.enabled = False
+      self.inputVolume3D.enabled = False
       self.modelFileSelector.enabled = False
       self.pushScanPlaneCheckBox.enabled = False
       self.pushTipToRobotCheckBox.enabled = False
       self.pushTargetToRobotCheckBox.enabled = False
-      self.sendPlaneButton.enabled = False
+      self.sendPlane0Button.enabled = False
       self.updateScanPlaneCheckBox.enabled = False
       self.firstVolumeSelector.enabled = False
       self.secondVolumeSelector.enabled = False
       self.segmentationMaskSelector.enabled = False
-      self.sceneViewButton_red.enabled = False
-      self.sceneViewButton_yellow.enabled = False
-      self.sceneViewButton_green.enabled = False
+      self.scenePlane0Button_red.enabled = False
+      self.scenePlane0Button_yellow.enabled = False
+      self.scenePlane0Button_green.enabled = False
       self.bridgeConnectionSelector.enabled = False
       self.robotConnectionSelector.enabled = False
       self.transformSelector.enabled = False
@@ -590,15 +641,25 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
     self.startTrackingButton.enabled = rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
+  
+  def updateModelList(self):
+    if self.inputVolume2D.checked:
+      listPath = os.path.join(self.modelPath,'2D')
+    else:
+      listPath = os.path.join(self.modelPath,'3D')
+    modelList = []
+    modelList = [f for f in os.listdir(listPath) if os.path.isfile(os.path.join(listPath, f))]
+    self.modelFileSelector.clear()
+    self.modelFileSelector.addItems(modelList)
     
   # Get selected scene view for initializing scan plane (PLANE_0)
   def getSelectedView(self):
     selectedView = None
-    if (self.sceneViewButton_red.checked == True):
+    if (self.scenePlane0Button_red.checked == True):
       selectedView = ('Red')
-    elif (self.sceneViewButton_yellow.checked ==True):
+    elif (self.scenePlane0Button_yellow.checked ==True):
       selectedView = ('Yellow')
-    elif (self.sceneViewButton_green.checked ==True):
+    elif (self.scenePlane0Button_green.checked ==True):
       selectedView = ('Green')
     return selectedView
 
@@ -616,19 +677,20 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.isTrackingOn = True
     self.updateButtons()
     # Store selected parameters
-    model = self.modelFileSelector.currentText
     self.pushScanPlane = self.pushScanPlaneCheckBox.checked 
     self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.firstVolume = self.firstVolumeSelector.currentNode()
     self.secondVolume = self.secondVolumeSelector.currentNode() 
     self.segmentationNode = self.segmentationMaskSelector.currentNode()
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
+    self.inputVolume = '2D' if self.inputVolume2D.checked else '3D'
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     self.clientNode = self.robotConnectionSelector.currentNode()
     self.zFrameTransform = self.transformSelector.currentNode()
+    self.model = self.modelFileSelector.currentText
     # Initialize tracking logic
-    self.logic.initializeTracking(model, self.segmentationNode, self.firstVolume)
+    self.logic.initializeTracking(self.inputVolume, self.model, self.segmentationNode, self.firstVolume)
     # Initialize PLAN_0
     if self.updateScanPlane == True:
       viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
@@ -677,7 +739,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.isTrackingOn:
       debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, debugFlag=debugFlag) 
+      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, debugFlag=debugFlag) 
       if confidence is None:
         print('Tracking failed')
       else:
@@ -715,12 +777,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.count = None
 
     # Check if PLANE_0 node exists, if not, create a new one
-    self.scanPlaneTransformNode = slicer.util.getFirstNodeByName('PLANE_0')
-    if self.scanPlaneTransformNode is None or self.scanPlaneTransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
-        self.scanPlaneTransformNode = slicer.vtkMRMLLinearTransformNode()
-        self.scanPlaneTransformNode.SetName('PLANE_0')
-        # self.scanPlaneTransformNode.SetHideFromEditors(True)
-        slicer.mrmlScene.AddNode(self.scanPlaneTransformNode)
+    self.scanPlane0TransformNode = slicer.util.getFirstNodeByName('PLANE_0')
+    if self.scanPlane0TransformNode is None or self.scanPlane0TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+        self.scanPlane0TransformNode = slicer.vtkMRMLLinearTransformNode()
+        self.scanPlane0TransformNode.SetName('PLANE_0')
+        # self.scanPlane0TransformNode.SetHideFromEditors(True)
+        slicer.mrmlScene.AddNode(self.scanPlane0TransformNode)
     self.initializeScanPlane(plane='COR')
     # Check if needle labelmap node exists, if not, create a new one
     self.needleLabelMapNode = slicer.util.getFirstNodeByName('NeedleLabelMap')
@@ -771,7 +833,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
-      parameterNode.SetParameter('Debug', 'False')  
+      parameterNode.SetParameter('Debug', 'False') 
+    if not parameterNode.GetParameter('InputMode'):
+      parameterNode.SetParameter('InputMode', 'Mag/Phase')  
+    if not parameterNode.GetParameter('InputVolume'):
+      parameterNode.SetParameter('InputVolume', '2D')               
     if not parameterNode.GetParameter('PushScanPlane'): 
       parameterNode.SetParameter('PushScanPlane', 'False')  
     if not parameterNode.GetParameter('PushTipToRobot'): 
@@ -862,6 +928,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
         return sitk_line.TransformIndexToPhysicalPoint(extremity2)
 
+  # Return string with the image direction name
+  def getDirectionName(self, sitk_image):
+    AX_DIR = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    COR_DIR = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0) 
+    SAG_DIR = (0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
+    direction = sitk_image.GetDirection()
+    if direction == AX_DIR:
+        return 'AX'
+    elif direction == SAG_DIR:
+        return 'SAG'
+    elif direction == COR_DIR:
+        return 'COR'
+    else:
+        return 'Reformat'
+      
   def getNeedleDirection(labelmap):
     # Get the voxel coordinates of the labeled points (non-zero values) in the labelmap
     coordinates = np.array(np.where(labelmap))
@@ -916,9 +997,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
       return None
   
-  def setupUNet(self, model, in_channels=2, out_channels=3, orientation='PIL', pixel_dim=(3.6, 1.171875, 1.171875), min_size_obj=50):
+  def setupUNet(self, inputVolume, model, in_channels=2, out_channels=3, orientation='LPI'):
     # Setup UNet model
-    model_file= os.path.join(self.path, 'Models', model)
     model_unet = UNet(
       spatial_dims=3,
       in_channels=in_channels,
@@ -930,47 +1010,52 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     self.model = model_unet.to(device)
-    self.model.load_state_dict(torch.load(model_file, map_location=device))
+    self.model.load_state_dict(torch.load(model, map_location=device))
     ## Setup transforms
+    if inputVolume == '2D':
+      pixel_dim = (6, 1.171875, 1.171875)
+    else:
+      pixel_dim = (3.6, 1.171875, 1.171875)
     # Define pre-inference transforms
     if in_channels==2:
       pre_array = [
         # 2-channel input
-        LoadSitkImaged(keys=["image_1", "image_2"]),
-        EnsureChannelFirstd(keys=["image_1", "image_2"]), 
-        ConcatItemsd(keys=["image_1", "image_2"], name="image"),
+        LoadSitkImaged(keys=['image_1', 'image_2']),
+        EnsureChannelFirstd(keys=['image_1', 'image_2']), 
+        ConcatItemsd(keys=['image_1', 'image_2'], name='image'),
       ]        
     else:
       pre_array = [
         # 1-channel input
-        LoadSitkImaged(keys=["image"]),
-        EnsureChannelFirstd(keys=["image"], channel_dim='no_channel'),
+        LoadSitkImaged(keys=['image']),
+        EnsureChannelFirstd(keys=['image'], channel_dim='no_channel'),
       ]
-    pre_array.append(ScaleIntensityd(keys=["image"], minv=0, maxv=1, channel_wise=True))
-    pre_array.append(Orientationd(keys=["image"], axcodes=orientation))
-    pre_array.append(Spacingd(keys=["image"], pixdim=pixel_dim, mode=("bilinear")))
-    self.pre_transforms = Compose(pre_array)
+    pre_array.append(ScaleIntensityd(keys=['image'], minv=0, maxv=1, channel_wise=True))
+    # Separate COR / SAG / AX
+    pre_array_cor = pre_array[:]
+    pre_array_sag = pre_array[:]
+    pre_array_ax = pre_array[:]
+    pre_array_cor.append(Orientationd(keys=['image'], axcodes='PIL'))
+    pre_array_sag.append(Orientationd(keys=['image'], axcodes='LIP'))
+    pre_array_ax.append(Orientationd(keys=['image'], axcodes='PIL')) # TODO: Define correct orientation for axial
+    
+    pre_array_cor.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
+    pre_array_sag.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
+    pre_array_ax.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
+    
+    self.pre_transforms_cor = Compose(pre_array_cor)
+    self.pre_transforms_sag = Compose(pre_array_sag)
+    self.pre_transforms_ax = Compose(pre_array_ax)
+    
     # Define post-inference transforms
-    self.post_transforms = Compose([
-      Invertd(
-        keys="pred",
-        transform=self.pre_transforms,
-        orig_keys="image", 
-        meta_keys="pred_meta_dict", 
-        orig_meta_keys="image_meta_dict",  
-        meta_key_postfix="meta_dict",  
-        nearest_interp=False,
-        to_tensor=True,
-      ),
-      AsDiscreted(keys="pred", argmax=True, num_classes=3),
-      # RemoveSmallObjectsd(keys="pred", min_size=int(min_size_obj), connectivity=1, independent_channels=True),
-      # KeepLargestConnectedComponentd(keys="pred", independent=True),
-      PushSitkImaged(keys="pred", meta_keys="pred_meta_dict", resample=False, output_dtype=np.uint16, print_log=False),
-    ])  
-  
+    self.post_transforms = Compose([ AsDiscreted(keys=['pred'], argmax=True, num_classes=3),
+                                     PushSitkImaged(keys=['pred'], resample=True, print_log=False)
+                                  ])  
+
   # Initialize the tracking logic
-  def initializeTracking(self, model, segmentationNode, firstVolume):
-    self.setupUNet(model) # Setup UNet
+  def initializeTracking(self, inputVolume, modelName, segmentationNode, firstVolume):
+    modelFilePath = os.path.join(self.path, 'Models', inputVolume, modelName)
+    self.setupUNet(inputVolume, modelFilePath) # Setup UNet
     self.count = 0        # Initialize sequence counter
     self.sitk_mask = self.getMaskFromSegmentation(segmentationNode, firstVolume)    # Update mask (None if nothing in segmentationNode)
 
@@ -986,7 +1071,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # If sliceOnly, will set position of the slice only (keep the other coordinates zero)
   def initializeScanPlane(self, coordinates=(0,0,0), plane='COR', sliceOnly=True):
     m = vtk.vtkMatrix4x4()
-    self.scanPlaneTransformNode.GetMatrixTransformToParent(m)
+    self.scanPlane0TransformNode.GetMatrixTransformToParent(m)
     position = [coordinates[0], coordinates[1], coordinates[2]]
     # Set rotation
     if plane == 'AX':
@@ -1011,7 +1096,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     m.SetElement(0, 3, position[0])
     m.SetElement(1, 3, position[1])
     m.SetElement(2, 3, position[2])
-    self.scanPlaneTransformNode.SetMatrixTransformToParent(m)
+    self.scanPlane0TransformNode.SetMatrixTransformToParent(m)
 
   def updateScanPlane(self, checkConfidence=True, plane='COR', sliceOnly=True):
     if checkConfidence:
@@ -1021,7 +1106,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if confidentUpdate:
       # Get current PLAN_0
       plane_matrix = vtk.vtkMatrix4x4()
-      self.scanPlaneTransformNode.GetMatrixTransformToParent(plane_matrix)
+      self.scanPlane0TransformNode.GetMatrixTransformToParent(plane_matrix)
       # Get current tip transform
       tip_matrix = vtk.vtkMatrix4x4()
       self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
@@ -1037,16 +1122,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
         elif plane == 'AX':
           plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
-      self.scanPlaneTransformNode.SetMatrixTransformToParent(plane_matrix)
+      self.scanPlane0TransformNode.SetMatrixTransformToParent(plane_matrix)
     else:
       print('Scan Plane not updated - No confidence on needle tracking')
     return
 
   def pushScanPlaneToIGTLink(self, connectionNode):
     #  Push to IGTLink
-    connectionNode.RegisterOutgoingMRMLNode(self.scanPlaneTransformNode)
-    connectionNode.PushNode(self.scanPlaneTransformNode)
-    connectionNode.UnregisterOutgoingMRMLNode(self.scanPlaneTransformNode)
+    connectionNode.RegisterOutgoingMRMLNode(self.scanPlane0TransformNode)
+    connectionNode.PushNode(self.scanPlane0TransformNode)
+    connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane0TransformNode)
 
   def pushTargetToIGTLink(self, connectionNode, targetNode):
     # Apply zTransform to currentTip
@@ -1076,11 +1161,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, firstVolume, secondVolume, inputMode, in_channels=2, out_channels=3, window_size=(3,48,48), debugFlag=False):
+  def getNeedle(self, firstVolume, secondVolume, inputMode, inputVolume, in_channels=2, out_channels=3, debugFlag=False):
     # Using only one slice volumes for now
     # TODO: Maybe we will extend to 3 stacked slices? Not sure if will be necessary
     # Increment sequence counter
     self.count += 1    
+    if inputVolume == '2D':
+      window_size = (1,48,48)
+    else:
+      window_size = (3,48,48)
     # Get itk images from MRML volume nodes 
     if (inputMode == 'RealImag'): # Convert to magnitude/phase
       (sitk_img_m, sitk_img_p) = self.realImagToMagPhase(firstVolume, secondVolume)
@@ -1090,6 +1179,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
     sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
+    plane = self.getDirectionName(sitk_img_m)
     
     # Push debug images to Slicer     
     if debugFlag:
@@ -1110,9 +1200,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ######################################
     # Set input dictionary
     if in_channels==2:
-      input_dict = [{'image_1': sitk_img_m, 'image_2': sitk_img_p}]
+      input_dict = {'image_1': sitk_img_m, 'image_2': sitk_img_p}
     else:
-      input_dict = [{'image':sitk_img_m}]
+      input_dict = {'image':sitk_img_m}
 
     ######################################
     ##                                  ##
@@ -1121,17 +1211,26 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ######################################
 
     # Apply pre_transforms
-    data = self.pre_transforms(input_dict)[0]
+    if plane == 'SAG':
+      pre_transforms = self.pre_transforms_sag
+    elif plane == 'COR':
+      pre_transforms = self.pre_transforms_cor
+    else:
+      pre_transforms = self.pre_transforms_ax
+    data = pre_transforms(input_dict)
 
     # Evaluate model
     self.model.eval()
     with torch.no_grad():
-        batch_input = data['image'].unsqueeze(0)
-        val_inputs = batch_input.to(torch.device('cpu'))
-        val_outputs = sliding_window_inference(val_inputs, window_size, 4, self.model)
-        data['pred'] = decollate_batch(val_outputs)[0]
-        sitk_output = self.post_transforms(data)['pred']
-
+      batch_input = data['image'].unsqueeze(0)
+      val_inputs = batch_input.to(torch.device('cpu'))
+      val_outputs = sliding_window_inference(val_inputs, window_size, 1, self.model)
+      data['pred'] = val_outputs[0]
+    # Apply post-transform
+    data = self.post_transforms(data)
+    sitk_output = data['pred']
+    
+        
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
     self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug'), is_label=True)
