@@ -649,6 +649,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       listPath = os.path.join(self.modelPath,'3D')
     modelList = []
     modelList = [f for f in os.listdir(listPath) if os.path.isfile(os.path.join(listPath, f))]
+    modelList.sort()
     self.modelFileSelector.clear()
     self.modelFileSelector.addItems(modelList)
     
