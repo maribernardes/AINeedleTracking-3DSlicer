@@ -380,6 +380,33 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
     advancedFormLayout.addRow('Debug', self.debugFlagCheckBox)
 
+    # Window size for sliding window
+    self.windowSizeWidget = ctk.ctkSliderWidget()
+    self.windowSizeWidget.singleStep = 8
+    self.windowSizeWidget.minimum = 32
+    self.windowSizeWidget.maximum = 72
+    self.windowSizeWidget.value = 64
+    self.windowSizeWidget.setToolTip("Set window size (px) for the sliding window")
+    advancedFormLayout.addRow("Sliding window size ", self.windowSizeWidget)
+
+    # Min tip size for segmentation acceptance
+    self.minTipSizeWidget = ctk.ctkSliderWidget()
+    self.minTipSizeWidget.singleStep = 5
+    self.minTipSizeWidget.minimum = 5
+    self.minTipSizeWidget.maximum = 35
+    self.minTipSizeWidget.value = 10
+    self.minTipSizeWidget.setToolTip("Set minimum tip size (px) for accepting segmentation")
+    advancedFormLayout.addRow("Minimum tip size ", self.minTipSizeWidget)
+
+    # Min shaft size for segmentation acceptance
+    self.minShaftSizeWidget = ctk.ctkSliderWidget()
+    self.minShaftSizeWidget.singleStep = 5
+    self.minShaftSizeWidget.minimum = 5
+    self.minShaftSizeWidget.maximum = 50
+    self.minShaftSizeWidget.value = 20
+    self.minShaftSizeWidget.setToolTip("Set minimum shaft size (px) for accepting segmentation")
+    advancedFormLayout.addRow("Minimum shaft size ", self.minShaftSizeWidget)
+
     self.layout.addStretch(1)
     
     ####################################
@@ -405,6 +432,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.segmentationMaskSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.windowSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+    self.minTipSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+    self.minShaftSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+
     self.pushScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.pushTargetToRobotCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
@@ -448,6 +479,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.firstVolume = None
     self.secondVolume = None
     self.debugFlag = None
+    self.windowSize = None
+    self.minTipSize = None
+    self.minShaftSize = None
     self.pushScanPlane = None
     self.pushTipToRobot = None
     self.pushTargetToRobot = None
@@ -529,9 +563,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.inputVolume2D.checked = (self._parameterNode.GetParameter('InputVolume') == '2D')
     self.inputVolume3D.checked = (self._parameterNode.GetParameter('InputVolume') == '3D')
-    self.inputChannels2.checked = (self._parameterNode.GetParameter('InputChannels') == '2')
-    self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3')
+    self.inputChannels2.checked = (self._parameterNode.GetParameter('InputChannels') == '2CH')
+    self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3CH')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
+    self.windowSizeWidget.value = float(self._parameterNode.GetParameter('WindowSize'))
+    self.minTipSizeWidget.value = float(self._parameterNode.GetParameter('MinTipSize'))
+    self.minShaftSizeWidget.value = float(self._parameterNode.GetParameter('MinShaftSize'))
     self.pushScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('PushScanPlane') == 'True')
     self.pushTipToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTipToRobot') == 'True')
     self.pushTargetToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTargetToRobot') == 'True')
@@ -560,8 +597,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('Mask', self.segmentationMaskSelector.currentNodeID)
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('InputVolume', '2D' if self.inputVolume2D.checked else '3D')
-    self._parameterNode.SetParameter('InputChannels', '2' if self.inputChannels2.checked else '3')
+    self._parameterNode.SetParameter('InputChannels', '2CH' if self.inputChannels2.checked else '3CH')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('WindowSize', str(self.windowSizeWidget.value))
+    self._parameterNode.SetParameter('MinTipSize', str(self.minTipSizeWidget.value))
+    self._parameterNode.SetParameter('MinShaftSize', str(self.minShaftSizeWidget.value))
     self._parameterNode.SetParameter('PushScanPlane', 'True' if self.pushScanPlaneCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushTipToRobot', 'True' if self.pushTipToRobotCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushTargetToRobot', 'True' if self.pushTargetToRobotCheckBox.checked else 'False')
@@ -583,6 +623,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Not tracking = ENABLE SELECTION
     if not self.isTrackingOn:
       # Logic for required variables selection: 
+      self.windowSizeWidget.setEnabled(True)
+      self.minTipSizeWidget.setEnabled(True)
+      self.minShaftSizeWidget.setEnabled(True)
       self.inputModeMagPhase.enabled = True
       self.inputModeRealImag.enabled = True
       self.inputVolume2D.enabled = True
@@ -638,6 +681,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.sendTargetButton.enabled = False
     # When tracking = DISABLE SELECTION
     else:
+      self.windowSizeWidget.setEnabled(False)
+      self.minTipSizeWidget.setEnabled(False)
+      self.minShaftSizeWidget.setEnabled(False)
       self.inputModeMagPhase.enabled = False
       self.inputModeRealImag.enabled = False
       self.inputVolume2D.enabled = False
@@ -673,9 +719,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     else:
       channels = '3'
     if self.inputVolume2D.checked:
-      listPath = os.path.join(self.modelPath,'2D-'+channels)
+      volume = '2'
     else:
-      listPath = os.path.join(self.modelPath,'3D-'+channels)
+      volume = '3'
+    listPath = os.path.join(self.modelPath,volume+'D-'+channels+'CH')
     modelList = []
     modelList = [f for f in os.listdir(listPath) if os.path.isfile(os.path.join(listPath, f))]
     modelList.sort()
@@ -707,13 +754,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.isTrackingOn = True
     self.updateButtons()
     # Store selected parameters
+    self.windowSize = int(self.windowSizeWidget.value)
+    self.minTipSize = int(self.minTipSizeWidget.value)
+    self.minShaftSize = int(self.minShaftSizeWidget.value)
     self.pushScanPlane = self.pushScanPlaneCheckBox.checked 
     self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.firstVolume = self.firstVolumeSelector.currentNode()
     self.secondVolume = self.secondVolumeSelector.currentNode() 
     self.segmentationNode = self.segmentationMaskSelector.currentNode()
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
-    self.inputVolume = '2D' if self.inputVolume2D.checked else '3D'
+    self.inputVolume = 2 if self.inputVolume2D.checked else 3
     self.inputChannels = 2 if self.inputChannels2.checked else 3
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
     self.serverNode = self.bridgeConnectionSelector.currentNode()
@@ -770,7 +820,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.isTrackingOn:
       debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, in_channels=self.inputChannels, debugFlag=debugFlag) 
+      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, debugFlag=debugFlag) 
       if confidence is None:
         print('Tracking failed')
       else:
@@ -872,12 +922,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('Debug'):
       parameterNode.SetParameter('Debug', 'False') 
+    if not parameterNode.GetParameter('WindowSize'):
+      parameterNode.SetParameter('WindowSize', '64') 
+    if not parameterNode.GetParameter('MinTipSize'):
+      parameterNode.SetParameter('MinTipSize', '10')     
+    if not parameterNode.GetParameter('MinShaftSize'):
+      parameterNode.SetParameter('MinShaftSize', '30') 
     if not parameterNode.GetParameter('InputMode'):
       parameterNode.SetParameter('InputMode', 'Mag/Phase')  
     if not parameterNode.GetParameter('InputVolume'):
       parameterNode.SetParameter('InputVolume', '2D')               
     if not parameterNode.GetParameter('InputChannels'):
-      parameterNode.SetParameter('InputChannels', '2')               
+      parameterNode.SetParameter('InputChannels', '2CH')               
     if not parameterNode.GetParameter('PushScanPlane'): 
       parameterNode.SetParameter('PushScanPlane', 'False')  
     if not parameterNode.GetParameter('PushTipToRobot'): 
@@ -943,6 +999,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       return False
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
     return True
+
+  # Check if two binary mask
+  def checkIfAdjacent(self, sitk_mask_1, sitk_mask_2, distance=1):
+    dilated_mask_1 = sitk.BinaryDilate(sitk_mask_1, (distance,distance,1))
+    intersection = dilated_mask_1 & sitk_mask_2
+    intersection_stats = sitk.StatisticsImageFilter()
+    intersection_stats.Execute(intersection)
+    # Check if there are any non-zero pixels in the intersection
+    if intersection_stats.GetSum() > 0:
+      return True
+    else:
+      return False
 
   # Given a binary skeleton image (single pixel-wide), find the physical coordinates of extremity closer to the image center
   def getShaftTipCoordinates(self, sitk_line):
@@ -1052,7 +1120,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.model = model_unet.to(device)
     self.model.load_state_dict(torch.load(model, map_location=device))
     ## Setup transforms
-    if inputVolume == '2D':
+    if inputVolume == '2':
       pixel_dim = (6, 1.171875, 1.171875)
     else:
       pixel_dim = (3.6, 1.171875, 1.171875)
@@ -1101,7 +1169,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
   # Initialize the tracking logic
   def initializeTracking(self, inputVolume, in_channels, modelName, segmentationNode, firstVolume):
-    modelFilePath = os.path.join(self.path, 'Models', inputVolume+'-'+str(in_channels), modelName)
+    modelFilePath = os.path.join(self.path, 'Models', str(inputVolume)+'D-'+str(in_channels)+'CH', modelName)
     self.setupUNet(inputVolume, in_channels, modelFilePath) # Setup UNet
     self.count = 0              # Initialize sequence counter
     # Reset tip transform nodes
@@ -1214,15 +1282,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, firstVolume, secondVolume, inputMode, inputVolume, in_channels=2, out_channels=3, debugFlag=False):    
+  def getNeedle(self, firstVolume, secondVolume, inputMode, inputVolume, windowSize=64, in_channels=2, out_channels=3, minTip=10, minShaft=30, debugFlag=False):    
     # Increment tracking counter
     self.count += 1    
 
     # Adjust window_size to input volume
-    if inputVolume == '2D':
-      window_size = (1,64,64)
+    if inputVolume == 2:
+      window_size = (1, windowSize, windowSize)
     else:
-      window_size = (3,48,48)
+      window_size = (3, windowSize, windowSize)
 
     # Get itk images from MRML volume nodes 
     if (inputMode == 'RealImag'): # Convert to magnitude/phase
@@ -1314,8 +1382,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_tip = (sitk_output==2)
     sitk_shaft = (sitk_output==1)
     
-    center = None
-    shaft_tip = None
+    tip_label = None
+    shaft_label = None
     
     ######################################
     ##                                  ##
@@ -1325,16 +1393,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     # Try to select tip from segmentation
     if sitk.GetArrayFromImage(sitk_tip).sum() > 0:
+      # Separate in components
+      sitk_tip_components = sitk.ConnectedComponent(sitk_tip)
       # Get labels from segmentation
       stats = sitk.LabelShapeStatisticsImageFilter()
-      # TODO: With fewer false positives, check if really necessary to compute the radius to check shaft pairing
       # stats.SetComputeFeretDiameter(True)
-      stats.Execute(sitk.ConnectedComponent(sitk_tip))
+      stats.Execute(sitk_tip_components)
       # Get labels sizes and centroid physical coordinates
+      labels = stats.GetLabels()
       labels_size = []
       labels_centroid = []
       # labels_max_radius = []
-      for l in stats.GetLabels():
+      for l in labels:
         number_pixels = stats.GetNumberOfPixels(l)
         centroid = stats.GetCentroid(l)
         # max_radius = stats.GetFeretDiameter(l)
@@ -1348,9 +1418,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
       if debugFlag:
         print('Selected tip = %s' %str(index_largest+1))
-      center = labels_centroid[index_largest]             # Get the largest centroid center
-      # max_distance = 1.1*labels_max_radius[index_largest] # Maximum acceptable distance between the tip centroid and the shaft tip
-      max_distance = 15
+      tip_center = labels_centroid[index_largest]             # Get the largest centroid center
+      tip_label = labels[index_largest]
+      tip_size = max(labels_size)
+      sitk_selected_tip = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label, upperThreshold=tip_label, insideValue=1, outsideValue=0)
+      # if centerSize >= minTip:
+      #   min_distance = labels_max_radius[index_largest]+1 # Maximum acceptable distance between the tip centroid and the shaft tip
+      #   max_distance = 1.1*min_distance
+      # else:
+      max_distance = 10
+      min_distance = 5
       
     ######################################
     ##                                  ##
@@ -1371,8 +1448,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # SetKernelRadius([x,y,z])
       # SetFullyConnected(True) # Test
       
-      sitk_shaft_labeled = sitk.ConnectedComponent(sitk_shaft)
-      stats.Execute(sitk_shaft_labeled)
+      sitk_shaft_components = sitk.ConnectedComponent(sitk_shaft)
+      stats.Execute(sitk_shaft_components)
       # Get labels sizes and centroid physical coordinates
       labels_size = []
       labels_centroid = []
@@ -1391,17 +1468,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           # print('Bounding box %s: -> Direction: %s, Center: %s, Size: %s' %(l, obb_dir, obb_center, obb_size))
         labels_size.append(number_pixels)
         labels_centroid.append(centroid)    
-        # labels_max_radius.append(max_radius)
-      
+        # labels_max_radius.append(max_radius)      
       # Get the largest shaft
       index_largest = labels_size.index(max(labels_size)) # Find index of largest centroid
-      label = labels[index_largest]
-      # Create a binary mask for the specific label
-      sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_labeled, lowerThreshold=label, upperThreshold=label)
-      # Create a skeleton
-      sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
-      shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
-      # shaft_direction = self.getShaftDirection()
+      if debugFlag:
+        print('Selected shaft = %s' %str(index_largest+1))
+      shaft_label = labels[index_largest]
+      shaft_size = max(labels_size)
+      sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label, upperThreshold=shaft_label, insideValue=1, outsideValue=0)
 
 
     ######################################
@@ -1419,22 +1493,50 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ######################################
 
     # Define confidence on tip estimate
-    if center is None:
-      center = shaft_tip      # Use shaft tip (no tip segmentation)
-      confidence = 'Low'      # Set estimate as low (no tip segmentation, just shaft)
-    elif shaft_tip is None:
-      confidence = 'Medium'   # Set estimate as medium (use tip, no shaft segmentation available)
-    else:
-      distance = np.linalg.norm(np.array(center) - np.array(shaft_tip))  # Calculate distance between tip and shaft
-      if distance <= max_distance:                             
-        confidence = 'High'   # Set estimate as high (both tip and shaft segmentation and they are close)
+    if tip_label is None: 
+      if shaft_label is None:
+        if debugFlag:
+          print('Tip coordinates: None')
+          print('Confidence: None')
+        return None                    # NONE (no tip, no shaft)
+      elif shaft_size >= minShaft:
+        sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
+        shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+        tip_center = shaft_tip          
+        confidence = 'Medium Low'      # MEDIUM LOW (no tip, good size shaft)
       else:
-        confidence = 'Medium' # Set estimate as medium (use tip segmentation, but shaft is not close)
-    if center is None:
-      if debugFlag:
-        print('Center coordinates: None')
-        print('Confidence: None')
-      return None
+        sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
+        shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+        tip_center = shaft_tip          
+        confidence = 'Low'             # LOW (no tip, small shaft)
+    elif shaft_label is None:
+      if tip_size > minTip: # Good size tip
+        confidence = 'Medium '         # MEDIUM (good tip, no shaft)
+      else:
+        confidence = 'Medium Low'      # MEDIUM LOW (small tip, no shaft)
+    else:
+      connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=1)
+      if not connected:
+        near = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=5)
+      if tip_size >= minTip: # Good size tip
+        if connected:
+          confidence = 'High'         # HIGH (good tip and shaft connected)      
+        elif near:          
+          confidence = 'Medium High'  # MEDIUM HIGH (good tip, shaft near)
+        else:
+          confidence = 'Medium Low'   # MEDIUM LOW (good tip, shaft too far)
+      else: # Small size tip
+        if connected:
+          confidence = 'Medium High'  # MEDIUM HIGH (small tip and shaft connected)    
+        elif near:
+          confidence = 'Medium'       # MEDIUM (small tip and shaft near)  
+        elif shaft_size >= minShaft:
+          sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
+          shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+          tip_center = shaft_tip          
+          confidence = 'Medium Low'   # MEDIUM LOW (small tip discarded, good size shaft)
+        else:
+          confidence = 'Low'          # LOW (small tip and small shaft)  
     
     ####################################
     ##                                ##
@@ -1443,10 +1545,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ####################################
 
     # Convert to 3D Slicer coordinates (RAS)
-    centerRAS = (-center[0], -center[1], center[2])     
+    centerRAS = (-tip_center[0], -tip_center[1], tip_center[2])     
     # # Plot
     if debugFlag:
-      print('Center coordinates: ' + str(centerRAS))
+      print('Tip coordinates: ' + str(centerRAS))
       print('Confidence: ' + confidence)
 
     # Push coordinates to tip Node
