@@ -1057,7 +1057,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       return (sitk_components, dict_components)
     else:
       return (None, None)
-    
+  
+  # Close segmentation gaps in the
+  def connectShaftGaps(self, sitk_image, gap_direction=[0, 3, 0]):
+    # Apply a binary closing operation (dilation followed by erosion)
+    sitk_dilated = sitk.BinaryDilate(sitk_image, gap_direction)
+    return sitk.BinaryErode(sitk_dilated, gap_direction)
+
   # Given a binary skeleton image (single pixel-wide), find the physical coordinates of extremity closer to the image center
   def getShaftTipCoordinates(self, sitk_line):
     # Get the coordinates of all non-zero pixels in the binary image
@@ -1472,9 +1478,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # SetFullyConnected(True) # Test
     # Separate in components
         
+    # Close segmentation gaps    
+    sitk_shaft = self.connectShaftGaps(sitk_shaft)
+    
     # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
     if debugFlag:
+      self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)
       if shaft_dict is not None:
         for element in shaft_dict:
           print('Shaft Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
