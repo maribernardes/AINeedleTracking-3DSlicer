@@ -490,6 +490,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.serverNode = None
     self.clientNode = None
     self.zFrameTransform = None
+    
+    self.processingTime = None
+    self.inferenceTime = None
 
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
@@ -755,6 +758,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.isTrackingOn = True
     self.updateButtons()
     self.processingTime = []
+    self.inferenceTime = []
     # Store selected parameters
     self.windowSize = int(self.windowSizeWidget.value)
     self.minTipSize = int(self.minTipSizeWidget.value)
@@ -795,6 +799,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     std_deviation = np.std(time_array)
     print('Total # of frames: %i' %len(time_array))
     print('Mean Processing Time: %.2f+-%.2f' %(mean_value, std_deviation))
+    time_array = np.array(self.inferenceTime)
+    mean_value = np.mean(time_array)
+    std_deviation = np.std(time_array)    
+    print('Mean Inference Time: %.2f+-%.2f' %(mean_value, std_deviation))
     #TODO: Define what should to be refreshed
     print('UI: stopTracking()')
     self.removeObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
@@ -829,10 +837,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       start_time = time.time()
       debugFlag = self.debugFlagCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, debugFlag=debugFlag) 
+      (confidence, inference_time) = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, debugFlag=debugFlag) 
       elapsed_time = time.time() - start_time
       self.processingTime.append(elapsed_time)
+      self.inferenceTime.append(inference_time)
       print(f"Elapsed time: %f seconds" %elapsed_time)
+      print(f"Inference time: %f seconds" %inference_time)
       if confidence is None:
         print('Tracking failed')
       else:
@@ -869,6 +879,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Used for saving data from experiments
     self.count = None
     self.tipDetected = False
+    self.inferenceTime = None
 
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByName('PLANE_0')
@@ -1207,6 +1218,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     modelFilePath = os.path.join(self.path, 'Models', str(inputVolume)+'D-'+str(in_channels)+'CH', modelName)
     self.setupUNet(inputVolume, in_channels, modelFilePath) # Setup UNet
     self.count = 0              # Initialize sequence counter
+    self.inferenceTime = 0
     # Reset tip transform nodes
     identityMatrix = vtk.vtkMatrix4x4()
     identityMatrix.Identity()
@@ -1391,6 +1403,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     data = pre_transforms(input_dict)
 
     # Evaluate model
+    start_time = time.time()
     self.model.eval()
     with torch.no_grad():
       batch_input = data['image'].unsqueeze(0)
@@ -1400,7 +1413,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Apply post-transform
     data = self.post_transforms(data)
     sitk_output = data['pred']
-    
+    inference_time = time.time() - start_time
         
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
@@ -1430,7 +1443,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################    
     
-    # Try to select tip from segmentation
+    # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
     if debugFlag:
       if tip_dict is not None:
@@ -1459,7 +1472,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # SetFullyConnected(True) # Test
     # Separate in components
         
-    # Try to select shaft from segmentation
+    # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
     if debugFlag:
       if shaft_dict is not None:
@@ -1495,9 +1508,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
           tip_size2 = tip_dict[1]['size']
-          sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label, upperThreshold=tip_label, insideValue=1, outsideValue=0)
+          sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)
           connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=1)
-          # Select by 2nd largest
+          # Select 2nd largest tip
           if connected is True:
             tip_label = tip_label2
             tip_center = tip_center2
@@ -1505,7 +1518,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
             sitk_selected_tip = sitk_selected_tip2
       else:
         connected = False
-        
+      
       if debugFlag:
         print('Selected tip = %s' %str(tip_label))  
         print('Selected shaft = %s' %str(shaft_label))  
@@ -1524,7 +1537,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if debugFlag:
           print('Tip coordinates: None')
           print('Confidence: None')
-        return None                    # NONE (no tip, no shaft)
+        return (None, inference_time)  # NONE (no tip, no shaft)
       elif shaft_size >= minShaft:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
         shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
@@ -1541,7 +1554,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       if tip_size > minTip: # Good size tip
         confidence = 'Medium '         # MEDIUM (good tip, no shaft)
       else:
-        confidence = 'Medium Low'      # MEDIUM LOW (small tip, no shaft)
+        confidence = 'Medium Low'      # MEDIUM LOW (small tip, no shaft) - Should it be LOW?
         # WITH SHAFT    
     else:
       if not connected:
@@ -1623,6 +1636,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Push confidence to Node
     self.needleConfidenceNode.SetText(confidence) 
-    return confidence
+    return (confidence, inference_time)
   
   ############################################
