@@ -1495,7 +1495,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Is 2nd largest a candidate?
       if len(shaft_dict)>1:
         shaft_size2 = shaft_dict[1]['size']
-        if shaft_size2 >= 0.25*shaft_size:
+        if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
         
     # Select largest tip
@@ -1507,7 +1507,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Is 2nd largest a candidate?
       if len(tip_dict)>1:
         tip_size2 = tip_dict[1]['size']
-        if tip_size2>= 0.25*tip_size:
+        if tip_size2 >= minTip:
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
         
