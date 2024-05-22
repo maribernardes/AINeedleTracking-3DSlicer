@@ -993,7 +993,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.fileWriter.Execute(sitk_image, os.path.join(path, name)+'.nrrd', False, 0)
   
   # Push an sitk image to a given volume node in Slicer
-  # Volume node can be an object volume node (use already created node) or 
+  # Volume node can be an object volume node (user already created node) or 
   # a string with node name (checks for node with this name and if non existant, creates it with provided type)
   def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode', debugFlag=False):
     # Provided a name (str)
@@ -1023,10 +1023,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
     return True
 
-  # Check if two binary mask
-  def checkIfAdjacent(self, sitk_mask_1, sitk_mask_2, distance=1):
-    dilated_mask_1 = sitk.BinaryDilate(sitk_mask_1, (distance,distance,1))
-    intersection = dilated_mask_1 & sitk_mask_2
+  # Check if two binary images have pixels close to each other by a given distance (default = 3px)
+  def checkIfAdjacent(self, sitk_tip, sitk_shaft, distance=3):
+    sitk_dilated_tip = sitk.BinaryDilate(sitk_tip, (distance, distance, distance))
+    intersection = sitk_dilated_tip & sitk_shaft
     intersection_stats = sitk.StatisticsImageFilter()
     intersection_stats.Execute(intersection)
     # Check if there are any non-zero pixels in the intersection
@@ -1376,7 +1376,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
-    ## Step 0: Set input dictionary     ##
+    ## Step 1: Set input dictionary     ##
     ##                                  ##
     ######################################
     # Set input dictionary
@@ -1395,10 +1395,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
-    ## Step 1: Inference                ##
+    ## Step 2: Inference                ##
     ##                                  ##
     ######################################
 
+    start_time = time.time()
     # Apply pre_transforms
     if plane == 'SAG':
       pre_transforms = self.pre_transforms_sag
@@ -1407,9 +1408,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
       pre_transforms = self.pre_transforms_ax
     data = pre_transforms(input_dict)
-
     # Evaluate model
-    start_time = time.time()
     self.model.eval()
     with torch.no_grad():
       batch_input = data['image'].unsqueeze(0)
@@ -1423,7 +1422,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
-    self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug'), is_label=True)
+    if debugFlag:
+      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug'), is_label=True)
 
     ######################################
     ##                                  ##
@@ -1436,22 +1436,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
       sitk_output = self.maskFilter.Execute(self.sitk_mask, sitk_output) # Apply mask to labels
 
-    # Separate labels
-    sitk_tip = (sitk_output==2)
-    sitk_shaft = (sitk_output==1)
-    
-    tip_label = None
-    shaft_label = None
     
     ######################################
     ##                                  ##
-    ## Step 3: Define tip labels        ##
+    ## Step 3: Separate tip elements    ##
     ##                                  ##
     ######################################    
-    
+
+    # Separate labels
+    sitk_tip = (sitk_output==2)
+    sitk_shaft = (sitk_output==1)
+        
     # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
     if debugFlag:
+      # self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip', debugFlag=debugFlag)
       if tip_dict is not None:
         for element in tip_dict:
           print('Tip Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
@@ -1460,31 +1459,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
-    ## Step 4: Define shaft label       ##
+    ## Step 4: Separate shaft elements  ##
     ##                                  ##
     ######################################        
-    # TODO: Use oriented bounding box instead of skeleton for getting the shaft limit points (and needle orientation)
-    # stats.SetComputeFeretDiameter(True)
-    # stats.SetComputeOrientedBoundingBox(True)
-    # max_radius = stats.GetFeretDiameter(l)
-    # obb = stats.GetOrientedBoundingBoxVertices(l)
-    # obb_dir = stats.GetOrientedBoundingBoxDirection(l)
-    # obb_center = stats.GetOrientedBoundingBoxOrigin(l)
-    # obb_size = stats.GetOrientedBoundingBoxSize(l)      
-    # print('Bounding box %s: -> Direction: %s, Center: %s, Size: %s' %(l, obb_dir, obb_center, obb_size))
-    # TODO: If shaft is constantly broke: Check need for BinaryClosingByReconstructionImageFilter
-    # Looks like it won't be necessary with new model
-    # SetKernelRadius([x,y,z])
-    # SetFullyConnected(True) # Test
-    # Separate in components
         
     # Close segmentation gaps    
     sitk_shaft = self.connectShaftGaps(sitk_shaft)
-    
     # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
     if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)
+      # self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)
       if shaft_dict is not None:
         for element in shaft_dict:
           print('Shaft Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
@@ -1493,53 +1477,89 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     ######################################
     ##                                  ##
-    ## Step 5: Select tip and shaft     ##
+    ## Step 5: Select tip/shaft labels  ##
     ##                                  ##
     ######################################    
 
-    #TODO: Connect fragmented shaft segmentation?
-    
+    # Initialize selected labels
+    tip_label = None
+    tip_label2 = None
+    shaft_label = None
+    shaft_label2 = None
+        
     # Selected largest shaft
     if shaft_dict is not None:
       shaft_label = shaft_dict[0]['label']
       shaft_size = shaft_dict[0]['size']
       sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label, upperThreshold=shaft_label, insideValue=1, outsideValue=0)
-
-    if tip_dict is not None:
-      # Select largest tip    
+      # Is 2nd largest a candidate?
+      if len(shaft_dict)>1:
+        shaft_size2 = shaft_dict[1]['size']
+        if shaft_size2 >= 0.25*shaft_size:
+          shaft_label2 = shaft_dict[1]['label']
+        
+    # Select largest tip
+    if tip_dict is not None: 
       tip_label = tip_dict[0]['label']
-      tip_center = tip_dict[0]['centroid']
       tip_size = tip_dict[0]['size']
+      tip_center = tip_dict[0]['centroid']
       sitk_selected_tip = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label, upperThreshold=tip_label, insideValue=1, outsideValue=0)
-      if shaft_label is not None:
-        connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=1)
-        if (connected is False) and (len(tip_dict)>1):
-          # Get 2nd largest tip    
+      # Is 2nd largest a candidate?
+      if len(tip_dict)>1:
+        tip_size2 = tip_dict[1]['size']
+        if tip_size2>= 0.25*tip_size:
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
-          tip_size2 = tip_dict[1]['size']
-          sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)
-          connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=1)
-          # Select 2nd largest tip
-          if connected is True:
-            tip_label = tip_label2
-            tip_center = tip_center2
-            tip_size = tip_size2
-            sitk_selected_tip = sitk_selected_tip2
-      else:
-        connected = False
-      
-      if debugFlag:
-        print('Selected tip = %s' %str(tip_label))  
-        print('Selected shaft = %s' %str(shaft_label))  
-        print('Connected = %s' %connected)
+        
+    # Check tip and shaft connection
+    connected = False
+    if (shaft_label is not None) and (tip_label is not None):
+        connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # S1T1
+        if (connected is False):
+          if (tip_label2 is not None): #Tip1 not connected to shaft1 - Check Tip2
+            sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)         
+            connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #S1T2
+            if connected is True: #Change selection to tip2
+              tip_label = tip_label2
+              tip_center = tip_center2
+              tip_size = tip_size2
+              sitk_selected_tip = sitk_selected_tip2
+            elif (shaft_label2 is not None): #Tip2 not connected to shaft1 - Check shaft2
+              sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
+              connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
+              if (connected is True): #Change selection to shaft2
+                shaft_label = shaft_label2
+                shaft_size = shaft_size2
+                sitk_selected_shaft = sitk_selected_shaft2
+              elif (tip_label2 is not None): #Tip1 not connected to shaft2 - Check Tip2
+                connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft2) #S2T2
+                if (connected is True): #Change selection to tip2 and shaft2
+                  tip_label = tip_label2
+                  tip_center = tip_center2
+                  tip_size = tip_size2
+                  sitk_selected_tip = sitk_selected_tip2
+                  shaft_label = shaft_label2
+                  shaft_size = shaft_size2
+                  sitk_selected_shaft = sitk_selected_shaft2                
+          elif (shaft_label2 is not None): #Tip1 not connected to shaft1 and NO Tip2 - Check shaft2
+            sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
+            connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
+            if (connected is True): #Change selection to shaft2
+              shaft_label = shaft_label2
+              shaft_size = shaft_size2
+              sitk_selected_shaft = sitk_selected_shaft2  
+            
+    if debugFlag:
+      print('Selected tip = %s' %str(tip_label))  
+      print('Selected shaft = %s' %str(shaft_label))  
+      print('Connected = %s' %connected)
     
     ######################################
     ##                                  ##
     ## Step 6: Set confidence for tip   ##
     ##                                  ##
     ######################################
-
+    
     # Define confidence on tip estimate
     # NO TIP
     if tip_label is None: 
@@ -1561,26 +1581,26 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # WITH TIP
         # NO SHAFT
     elif shaft_label is None:
-      if tip_size > minTip: # Good size tip
-        confidence = 'Medium '         # MEDIUM (good tip, no shaft)
+      if tip_size >= minTip: # Good size tip
+        confidence = 'Medium'   # MEDIUM (good tip, no shaft)
       else:
-        confidence = 'Medium Low'      # MEDIUM LOW (small tip, no shaft) - Should it be LOW?
+        confidence = 'Low'      # LOW (small tip, no shaft) 
         # WITH SHAFT    
     else:
-      if not connected:
-        near = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=5)
+      # if not connected:
+      #   near = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=5)
       if tip_size >= minTip: # Good size tip
         if connected:
           confidence = 'High'         # HIGH (good tip and shaft connected)      
-        elif near:          
-          confidence = 'Medium High'  # MEDIUM HIGH (good tip, shaft near)
+        # elif near:          
+        #   confidence = 'Medium High'  # MEDIUM HIGH (good tip, shaft near)
         else:
-          confidence = 'Medium Low'   # MEDIUM LOW (good tip, shaft too far)
+          confidence = 'Medium'   # MEDIUM LOW (good tip, shaft too far)
       else: # Small size tip
         if connected:
           confidence = 'Medium High'  # MEDIUM HIGH (small tip and shaft connected)    
-        elif near:
-          confidence = 'Medium'       # MEDIUM (small tip and shaft near)  
+        # elif near:
+        #   confidence = 'Medium'       # MEDIUM (small tip and shaft near)  
         # If tip is too small and far, check for shaft
         elif shaft_size >= minShaft:
           sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
