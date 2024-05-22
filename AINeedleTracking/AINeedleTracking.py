@@ -1563,52 +1563,46 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Define confidence on tip estimate
     # NO TIP
     if tip_label is None: 
+      # NO TIP and NO SHAFT
       if shaft_label is None:
         if debugFlag:
           print('Tip coordinates: None')
           print('Confidence: None')
         return (None, inference_time)  # NONE (no tip, no shaft)
+      # NO TIP WITH SHAFT
+      else:
+        sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
+        shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
+        tip_center = shaft_tip          
+        if shaft_size >= minShaft:
+          confidence = 'Medium Low'      # MEDIUM LOW (no tip, big shaft) - Use shaft tip
+        else:
+          confidence = 'Low'             # LOW (no tip, small shaft) - Use shaft tip
+    # WITH TIP and NO SHAFT
+    elif shaft_label is None:
+      if tip_size >= minTip: 
+        confidence = 'Medium'   # MEDIUM (big tip, no shaft) - Use tip center
+      else:
+        confidence = 'Low'      # LOW (small tip, no shaft) - Use tip center
+    # WITH TIP and SHAFT <CONNECTED>
+    elif connected:
+        if tip_size >= minTip: 
+          confidence = 'High'         # HIGH (big tip and shaft connected) - Use tip center           
+        elif shaft_size >= minShaft:
+          confidence = 'Medium High'  # MEDIUM HIGH (small tip and big shaft connected) - Use tip center
+        else:
+          confidence = 'Medium'       # MEDIUM (small tip and small shaft connected) - Use tip center
+    # WITH TIP and SHAFT <NOT CONNECTED>
+    else:
+      if tip_size >= minTip: 
+        confidence = 'Medium'  # MEDIUM LOW (big tip NOT connected)
       elif shaft_size >= minShaft:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
         shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
         tip_center = shaft_tip          
-        confidence = 'Medium Low'      # MEDIUM LOW (no tip, good size shaft)
+        confidence = 'Medium Low'   # MEDIUM LOW (small tip, big shaft) - Use shaft tip
       else:
-        sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
-        shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
-        tip_center = shaft_tip          
-        confidence = 'Low'             # LOW (no tip, small shaft)
-    # WITH TIP
-        # NO SHAFT
-    elif shaft_label is None:
-      if tip_size >= minTip: # Good size tip
-        confidence = 'Medium'   # MEDIUM (good tip, no shaft)
-      else:
-        confidence = 'Low'      # LOW (small tip, no shaft) 
-        # WITH SHAFT    
-    else:
-      # if not connected:
-      #   near = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft, distance=5)
-      if tip_size >= minTip: # Good size tip
-        if connected:
-          confidence = 'High'         # HIGH (good tip and shaft connected)      
-        # elif near:          
-        #   confidence = 'Medium High'  # MEDIUM HIGH (good tip, shaft near)
-        else:
-          confidence = 'Medium'   # MEDIUM LOW (good tip, shaft too far)
-      else: # Small size tip
-        if connected:
-          confidence = 'Medium High'  # MEDIUM HIGH (small tip and shaft connected)    
-        # elif near:
-        #   confidence = 'Medium'       # MEDIUM (small tip and shaft near)  
-        # If tip is too small and far, check for shaft
-        elif shaft_size >= minShaft:
-          sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
-          shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
-          tip_center = shaft_tip          
-          confidence = 'Medium Low'   # MEDIUM LOW (small tip discarded, good size shaft)
-        else:
-          confidence = 'Low'          # LOW (small tip and small shaft)  
+        confidence = 'Low'          # LOW (small tip and small shaft) - Use tip center 
     
     ####################################
     ##                                ##
