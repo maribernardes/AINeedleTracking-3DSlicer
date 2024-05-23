@@ -907,10 +907,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.model = self.modelFileSelector.currentText
     # Initialize tracking logic
     self.logic.initializeTracking(self.inputVolume, self.inputChannels, self.model, self.segmentationNode, self.firstVolume)
-    # Initialize PLAN_0
-    if self.updateScanPlane == True:
-      viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView())
-      self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
+    # Initialize PLAN_0 # TODO: Is this necessary?!?! Will overwrite manual setting of PLAN_0/1/2
+    # if self.updateScanPlane == True:
+    #   viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView0())
+    #   self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
     # Initialize zFrame transform
     if self.pushTipToRobot == True:
       self.logic.initializeZFrame(self.zFrameTransform)
