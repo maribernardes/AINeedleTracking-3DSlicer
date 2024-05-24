@@ -198,7 +198,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane0HBoxLayout.addWidget(self.scenePlane0Button_red)
     plane0HBoxLayout.addWidget(self.scenePlane0Button_yellow)
     plane0HBoxLayout.addWidget(self.scenePlane0Button_green)
-    self.sendPlane0Button = qt.QPushButton('Set Initial PLANE_0')
+    self.sendPlane0Button = qt.QPushButton('Set PLANE_0')
     self.sendPlane0Button.toolTip = 'Send PLANE_0 to scanner'
     self.sendPlane0Button.setFixedWidth(170)
     self.sendPlane0Button.enabled = False
@@ -231,7 +231,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane1HBoxLayout.addWidget(self.scenePlane1Button_red)
     plane1HBoxLayout.addWidget(self.scenePlane1Button_yellow)
     plane1HBoxLayout.addWidget(self.scenePlane1Button_green)
-    self.sendPlane1Button = qt.QPushButton('Set Initial PLANE_1')
+    self.sendPlane1Button = qt.QPushButton('Set PLANE_1')
     self.sendPlane1Button.toolTip = 'Send PLANE_1 to scanner'
     self.sendPlane1Button.setFixedWidth(170)
     self.sendPlane1Button.enabled = False
@@ -264,22 +264,31 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane2HBoxLayout.addWidget(self.scenePlane2Button_red)
     plane2HBoxLayout.addWidget(self.scenePlane2Button_yellow)
     plane2HBoxLayout.addWidget(self.scenePlane2Button_green)
-    self.sendPlane2Button = qt.QPushButton('Set Initial PLANE_2')
+    self.sendPlane2Button = qt.QPushButton('Set PLANE_2')
     self.sendPlane2Button.toolTip = 'Send PLANE_2 to scanner'
     self.sendPlane2Button.setFixedWidth(170)
     self.sendPlane2Button.enabled = False
     plane2HBoxLayout.addWidget(self.sendPlane2Button)
     optionalFormLayout.addRow(plane2HBoxLayout)
     
-    # UpdateScanPlan mode check box (output images at intermediate steps)
+    # UpdateScanPlan check box
     autoUpdateHBoxLayout = qt.QHBoxLayout()
-    autoUpdateLabel = qt.QLabel('Auto update')
+    autoUpdateLabel = qt.QLabel('Online update')
     autoUpdateLabel.setFixedWidth(105)
     self.updateScanPlaneCheckBox = qt.QCheckBox()
     self.updateScanPlaneCheckBox.checked = False
-    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane with current tip position')
+    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane automatically with current tip position')
+    # CenterAtTip check box
+    centerAtTipLabel = qt.QLabel('Center at tip')
+    self.centerAtTipCheckBox = qt.QCheckBox()
+    self.centerAtTipCheckBox.checked = False
+    self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
     autoUpdateHBoxLayout.addWidget(autoUpdateLabel)
     autoUpdateHBoxLayout.addWidget(self.updateScanPlaneCheckBox)
+    autoUpdateHBoxLayout.addWidget(hSpacer)
+    autoUpdateHBoxLayout.addWidget(centerAtTipLabel)
+    autoUpdateHBoxLayout.addWidget(self.centerAtTipCheckBox)
+    autoUpdateHBoxLayout.addStretch()
     optionalFormLayout.addRow(autoUpdateHBoxLayout)   
     
     separator2 = SeparatorWidget('Target and Needle Tip')
@@ -420,12 +429,37 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     advancedCollapsibleButton.collapsed=1
     self.layout.addWidget(advancedCollapsibleButton)
     advancedFormLayout = qt.QFormLayout(advancedCollapsibleButton)
-    
+
+    # Log mode check box (print log messages)
+    logHBoxLayout = qt.QHBoxLayout()  
+    logLabel = qt.QLabel('Screen log')
+    logLabel.setFixedWidth(80)
+    self.logFlagCheckBox = qt.QCheckBox()
+    self.logFlagCheckBox.checked = False
+    self.logFlagCheckBox.setToolTip('If checked, prints log messages at intermediate steps')
+    logHBoxLayout.addWidget(logLabel)
+    logHBoxLayout.addWidget(self.logFlagCheckBox)
+    logHBoxLayout.addStretch()
+    advancedFormLayout.addRow(logHBoxLayout)
+        
     # Debug mode check box (output images at intermediate steps)
+    saveHBoxLayout = qt.QHBoxLayout()   
+    debugLabel = qt.QLabel('Save images')
+    debugLabel.setFixedWidth(80)
     self.debugFlagCheckBox = qt.QCheckBox()
     self.debugFlagCheckBox.checked = False
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
-    advancedFormLayout.addRow('Debug', self.debugFlagCheckBox)
+    self.debugNameTextbox = qt.QLineEdit()
+    self.debugNameTextbox.setFixedWidth(250)
+    self.debugNameTextbox.setPlaceholderText('Include optional subfolder name')
+    self.debugNameTextbox.setReadOnly(False)
+    self.debugNameTextbox.enabled = False
+    saveHBoxLayout.addWidget(debugLabel)
+    saveHBoxLayout.addWidget(self.debugFlagCheckBox)
+    saveHBoxLayout.addWidget(hSpacer)    
+    saveHBoxLayout.addWidget(self.debugNameTextbox)  
+    saveHBoxLayout.addStretch()  
+    advancedFormLayout.addRow(saveHBoxLayout)    
 
     # Window size for sliding window
     self.windowSizeWidget = ctk.ctkSliderWidget()
@@ -478,7 +512,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.secondVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.segmentationMaskSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
+    self.logFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.debugNameTextbox.connect("textChanged", self.updateParameterNodeFromGUI)
     self.windowSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minTipSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minShaftSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
@@ -492,6 +528,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.scenePlane0Button_yellow.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.scenePlane0Button_green.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.centerAtTipCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.bridgeConnectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.robotConnectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     self.transformSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
@@ -516,6 +553,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushTipToRobotCheckBox.connect("toggled(bool)", self.updateButtons)
     self.pushTargetToRobotCheckBox.connect("toggled(bool)", self.updateButtons)
     self.updateScanPlaneCheckBox.connect("toggled(bool)", self.updateButtons)
+    self.centerAtTipCheckBox.connect("toggled(bool)", self.updateButtons)
     self.pushPlane0CheckBox.connect("toggled(bool)", self.updateButtons)
     self.pushPlane1CheckBox.connect("toggled(bool)", self.updateButtons)
     self.pushPlane2CheckBox.connect("toggled(bool)", self.updateButtons)
@@ -531,17 +569,24 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels = None
     self.firstVolume = None
     self.secondVolume = None
-    self.debugFlag = None
-    self.windowSize = None
-    self.minTipSize = None
-    self.minShaftSize = None
-    self.pushScanPlane = None
+
+    self.pushScanPlane0 = None
+    self.pushScanPlane1 = None
+    self.pushScanPlane2 = None
+    self.updateScanPlane = None
+    self.centerScanAtTip = None
+
     self.pushTipToRobot = None
     self.pushTargetToRobot = None
-    self.updateScanPlane = None
     self.serverNode = None
     self.clientNode = None
     self.zFrameTransform = None
+
+    self.debugFlag = None
+    self.debugName = None
+    self.windowSize = None
+    self.minTipSize = None
+    self.minShaftSize = None
     
     self.processingTime = None
     self.inferenceTime = None
@@ -621,7 +666,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputVolume3D.checked = (self._parameterNode.GetParameter('InputVolume') == '3D')
     self.inputChannels2.checked = (self._parameterNode.GetParameter('InputChannels') == '2CH')
     self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3CH')
+    self.logFlagCheckBox.checked = (self._parameterNode.GetParameter('ScreenLog') == 'True')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
+    self.debugNameTextbox.setText(self._parameterNode.GetParameter('DebugName'))
     self.windowSizeWidget.value = float(self._parameterNode.GetParameter('WindowSize'))
     self.minTipSizeWidget.value = float(self._parameterNode.GetParameter('MinTipSize'))
     self.minShaftSizeWidget.value = float(self._parameterNode.GetParameter('MinShaftSize'))
@@ -631,6 +678,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushTipToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTipToRobot') == 'True')
     self.pushTargetToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTargetToRobot') == 'True')
     self.updateScanPlaneCheckBox.checked = (self._parameterNode.GetParameter('UpdateScanPlane') == 'True')
+    self.centerAtTipCheckBox.checked = (self._parameterNode.GetParameter('CenterScanAtTip') == 'True')
     self.bridgeConnectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('Server'))
     self.robotConnectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('Client'))
     self.transformSelector.setCurrentNode(self._parameterNode.GetNodeReference('zFrame'))
@@ -656,7 +704,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('InputVolume', '2D' if self.inputVolume2D.checked else '3D')
     self._parameterNode.SetParameter('InputChannels', '2CH' if self.inputChannels2.checked else '3CH')
+    self._parameterNode.SetParameter('ScreenLog', 'True' if self.logFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('DebugName', self.debugNameTextbox.text.strip())    
     self._parameterNode.SetParameter('WindowSize', str(self.windowSizeWidget.value))
     self._parameterNode.SetParameter('MinTipSize', str(self.minTipSizeWidget.value))
     self._parameterNode.SetParameter('MinShaftSize', str(self.minShaftSizeWidget.value))
@@ -666,6 +716,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('PushTipToRobot', 'True' if self.pushTipToRobotCheckBox.checked else 'False')
     self._parameterNode.SetParameter('PushTargetToRobot', 'True' if self.pushTargetToRobotCheckBox.checked else 'False')
     self._parameterNode.SetParameter('UpdateScanPlane', 'True' if self.updateScanPlaneCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('CenterScanAtTip', 'True' if self.centerAtTipCheckBox.checked else 'False')
     self._parameterNode.SetNodeReferenceID('Server', self.bridgeConnectionSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('Client', self.robotConnectionSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('zFrame', self.transformSelector.currentNodeID)
@@ -680,6 +731,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     clientDefined = True      # Not required
     transformDefined = True   # Not required
     targetDefined = True      # Not required 
+    debugNameDefined = True   # Not required 
+  
     scanPlaneDefined = True if (self.pushPlane0CheckBox.checked or self.pushPlane1CheckBox.checked or self.pushPlane2CheckBox.checked) else False
     
     # Not tracking = ENABLE SELECTION
@@ -712,8 +765,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       else:
         self.updateScanPlaneCheckBox.enabled = False
         self.bridgeConnectionSelector.enabled = False
-        serverDefined = self.bridgeConnectionSelector.currentNode()
-      
+      #1.b) Center Scan At the Tip
+      if  self.updateScanPlaneCheckBox.checked:
+        self.centerAtTipCheckBox.enabled = True
+      else:
+        self.centerAtTipCheckBox.enabled = False
       # PLAN_0
       if self.pushPlane0CheckBox.checked:
         self.scenePlane0Button_red.enabled = True
@@ -776,6 +832,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       else:
         self.targetSelector.enabled = False
         self.sendTargetButton.enabled = False
+      # 3) Debug
+      if self.debugFlagCheckBox.checked:
+        self.debugNameTextbox.enabled = True
+        # debugNameDefined = if self.debugNameTextbox.text.strip() 
+      else:
+        self.debugNameTextbox.enabled = False
     # When tracking = DISABLE SELECTION
     else:
       #Setup
@@ -804,6 +866,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.sendPlane1Button.enabled = False
       self.sendPlane2Button.enabled = False
       self.updateScanPlaneCheckBox.enabled = False
+      self.centerAtTipCheckBox.enabled = False
       #Optional - Tip and Target
       self.pushTipToRobotCheckBox.enabled = False
       self.pushTargetToRobotCheckBox.enabled = False
@@ -901,16 +964,26 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputVolume = 2 if self.inputVolume2D.checked else 3
     self.inputChannels = 2 if self.inputChannels2.checked else 3
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
+    self.centerScanAtTip = self.centerAtTipCheckBox.checked 
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     self.clientNode = self.robotConnectionSelector.currentNode()
     self.zFrameTransform = self.transformSelector.currentNode()
     self.model = self.modelFileSelector.currentText
+    self.debugFlag = self.debugFlagCheckBox.checked
+    self.debugName = self.debugNameTextbox.text.strip()
+
+    # Check if folder exists
+    if self.debugFlag:
+      path = os.path.dirname(os.path.abspath(__file__))
+      folder_path = os.path.join(path, 'Debug', self.debugName)
+      if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        print(f"Folder '{folder_path}' created.")
+      else:
+        print(f"Folder '{folder_path}' already exists.")
+
     # Initialize tracking logic
     self.logic.initializeTracking(self.inputVolume, self.inputChannels, self.model, self.segmentationNode, self.firstVolume)
-    # Initialize PLAN_0 # TODO: Is this necessary?!?! Will overwrite manual setting of PLAN_0/1/2
-    # if self.updateScanPlane == True:
-    #   viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView0())
-    #   self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # Reinitialize PLAN_0 at center position
     # Initialize zFrame transform
     if self.pushTipToRobot == True:
       self.logic.initializeZFrame(self.zFrameTransform)
@@ -936,31 +1009,34 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('UI: stopTracking()')
     self.removeObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
+  # Send PLAN_0 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane0(self):
     print('UI: sendPlane0()')
     # Get parameters
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView0())
     # Set  and push PLANE_0
-    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') # PLAN_0 at selected view slice (Default: sliceOnly=True)
+    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='COR') 
     self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='COR')
     
+  # Send PLAN_1 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane1(self):
     print('UI: sendPlane1()')
     # Get parameters
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView1())    
     # Set  and push PLANE_1
-    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='SAG') # PLAN_1 at selected view slice (Default: sliceOnly=True)
+    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='SAG') 
     self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='SAG')
 
+  # Send PLAN_2 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane2(self):
     print('UI: sendPlane2()')
     # Get parameters
     self.serverNode = self.bridgeConnectionSelector.currentNode()
     viewCoordinates = self.getSelectetViewCenterCoordinates(self.getSelectedView2())
     # Set  and push PLANE_2
-    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='AX') # PLAN_2 at selected view slice (Default: sliceOnly=True)
+    self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='AX')
     self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='AX')
 
   def sendTarget(self):
@@ -981,34 +1057,31 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Execute one tracking cycle
     if self.isTrackingOn:
       start_time = time.time()
-      debugFlag = self.debugFlagCheckBox.checked
+      logFlag = self.logFlagCheckBox.checked
       # Get needle tip
-      (confidence, plane, inference_time) = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, debugFlag=debugFlag) 
+      (confidence, inference_time) = self.logic.getNeedle(self.firstVolume, self.secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       elapsed_time = time.time() - start_time
       self.processingTime.append(elapsed_time)
       self.inferenceTime.append(inference_time)
-      print(f"Elapsed time: %f seconds" %elapsed_time)
-      print(f"Inference time: %f seconds" %inference_time)
       if confidence is None:
         print('Tracking failed')
       else:
         print('Tracked with %s confidence' %confidence)    
         if self.updateScanPlane is True:   
-          if (self.pushScanPlane0 is True) and (plane=='SAG' or plane=='AX'): # When image comes from SAG or AX, we update COR
-            self.logic.updateScanPlane(plane='COR', checkConfidence=True)
+          if (self.pushScanPlane0 is True):
+            self.logic.updateScanPlane(plane='COR', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
             self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='COR')
-            print('PLAN_0 updated')
-          if (self.pushScanPlane1 is True) and (plane=='COR' or plane=='AX'): # When image comes from COR or AX, we update SAG
-            self.logic.updateScanPlane(plane='SAG', checkConfidence=True)
-            self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='SAG')
-            print('PLAN_1 updated')          
-          if (self.pushScanPlane2 is True) and (plane=='COR' or plane=='SAG'): # When image comes from COR or SAG, we update AX
-            self.logic.updateScanPlane(plane='AX', checkConfidence=True)
+          if (self.pushScanPlane1 is True): 
+            self.logic.updateScanPlane(plane='SAG', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
+            self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='SAG')      
+          if (self.pushScanPlane2 is True):
+            self.logic.updateScanPlane(plane='AX', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
             self.logic.pushScanPlaneToIGTLink(self.serverNode, plane='AX')
-            print('PLAN_2 updated')          
         if self.pushTipToRobot is True:
           self.logic.pushTipToIGTLink(self.clientNode)
           print('Tip pushed to robot')
+      print(f"Elapsed time: %f seconds" %elapsed_time)
+      print(f"Inference time: %f seconds" %inference_time)
       print('____________________')
 ################################################################################################################################################
 # Logic Class
@@ -1033,15 +1106,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     # Used for saving data from experiments
     self.count = None
-    self.tipDetected = False
     self.inferenceTime = None
+    self.tipDetected = None
 
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByName('PLANE_0')
     if self.scanPlane0TransformNode is None or self.scanPlane0TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
         self.scanPlane0TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane0TransformNode.SetName('PLANE_0')
-        # self.scanPlane0TransformNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.scanPlane0TransformNode)
     self.initializeScanPlane(plane='COR')
     # Check if PLANE_1 node exists, if not, create a new one
@@ -1049,7 +1121,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if self.scanPlane1TransformNode is None or self.scanPlane1TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
         self.scanPlane1TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane1TransformNode.SetName('PLANE_1')
-        # self.scanPlane1TransformNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.scanPlane1TransformNode)
     self.initializeScanPlane(plane='SAG')
     # Check if PLANE_2 node exists, if not, create a new one
@@ -1057,16 +1128,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if self.scanPlane2TransformNode is None or self.scanPlane2TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
         self.scanPlane2TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane2TransformNode.SetName('PLANE_2')
-        # self.scanPlane2TransformNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.scanPlane2TransformNode)
     self.initializeScanPlane(plane='AX')
     # Check if needle labelmap node exists, if not, create a new one
     self.needleLabelMapNode = slicer.util.getFirstNodeByName('NeedleLabelMap')
     if self.needleLabelMapNode is None or self.needleLabelMapNode.GetClassName() != 'vtkMRMLLabelMapVolumeNode':
-        self.needleLabelMapNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'NeedleLabelMap') # Franklin fix
-        # self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
-        # self.needleLabelMapNode.SetName('NeedleLabelMap')
-        # slicer.mrmlScene.AddNode(self.needleLabelMapNode)
+        self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
+        self.needleLabelMapNode.SetName('NeedleLabelMap')
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
         colorTableNode = self.createColorTable()
         self.needleLabelMapNode.CreateDefaultDisplayNodes()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
@@ -1114,6 +1183,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       displayNode.SetVisibility(False)
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
+    if not parameterNode.GetParameter('ScreenLog'):
+      parameterNode.SetParameter('ScreenLog', 'False')     
     if not parameterNode.GetParameter('Debug'):
       parameterNode.SetParameter('Debug', 'False') 
     if not parameterNode.GetParameter('WindowSize'):
@@ -1139,7 +1210,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('PushTargetToRobot'): 
       parameterNode.SetParameter('PushTargetToRobot', 'False')
     if not parameterNode.GetParameter('UpdateScanPlane'): 
-      parameterNode.SetParameter('UpdateScanPlane', 'False')    
+      parameterNode.SetParameter('UpdateScanPlane', 'False')   
+    if not parameterNode.GetParameter('CenterScanAtTip'): 
+      parameterNode.SetParameter('CenterScanAtTip', 'False')     
     if not parameterNode.GetParameter('Model'): 
       parameterNode.SetParameter('Model', '0')
         
@@ -1170,7 +1243,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Push an sitk image to a given volume node in Slicer
   # Volume node can be an object volume node (user already created node) or 
   # a string with node name (checks for node with this name and if non existant, creates it with provided type)
-  def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode', debugFlag=False):
+  def pushSitkToSlicerVolume(self, sitk_image, node: slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str, type='vtkMRMLScalarVolumeNode'):
     # Provided a name (str)
     if isinstance(node, str):
       node_name = node
@@ -1400,12 +1473,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.setupUNet(inputVolume, in_channels, modelFilePath) # Setup UNet
     self.count = 0              # Initialize sequence counter
     self.inferenceTime = 0
+    self.tipDetected = False
     # Reset tip transform nodes
     identityMatrix = vtk.vtkMatrix4x4()
     identityMatrix.Identity()
     self.tipSegmNode.SetMatrixTransformToParent(identityMatrix)    
     self.tipTrackedNode.SetMatrixTransformToParent(identityMatrix)    
-    self.tipDetected = False    # Zero tip detection
     self.sitk_mask = self.getMaskFromSegmentation(segmentationNode, firstVolume)    # Update mask (None if nothing in segmentationNode)
 
   def initializeZFrame(self, zFrameToWorld):
@@ -1417,10 +1490,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   
   # Set Scan Plane Orientation
   # Default position is (0,0,0), unless center is specified 
-  # If sliceOnly, will set position of the slice only (keep the other coordinates zero)
-  def initializeScanPlane(self, coordinates=(0,0,0), plane='COR', sliceOnly=True):
+  # If sliceOnly, will set position of the slice only (keep the other coordinates as defined by previous values)
+  def initializeScanPlane(self, coordinates=(0,0,0), plane='COR', sliceOnly=False):
     m = vtk.vtkMatrix4x4()
-    position = [coordinates[0], coordinates[1], coordinates[2]]
     if plane == 'COR':
       # Set rotation
       m.SetElement(0, 0, 1); m.SetElement(0, 1, 0); m.SetElement(0, 2, 0)
@@ -1428,8 +1500,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       m.SetElement(2, 0, 0); m.SetElement(2, 1, 1); m.SetElement(2, 2, 0)
       # Set translation
       if sliceOnly:
-        position = [0, coordinates[1], 0]
-      m.SetElement(0, 3, position[0]); m.SetElement(1, 3, position[1]); m.SetElement(2, 3, position[2])
+        m.SetElement(1, 3, coordinates[1])
+      else:
+        m.SetElement(0, 3, coordinates[0]); m.SetElement(1, 3, coordinates[1]); m.SetElement(2, 3, coordinates[2])
       self.scanPlane0TransformNode.SetMatrixTransformToParent(m)
     elif plane == 'SAG':
       # Set rotation
@@ -1438,8 +1511,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       m.SetElement(2, 0, -1); m.SetElement(2, 1, 0); m.SetElement(2, 2, 0)
       # Set translation
       if sliceOnly:
-        position = [coordinates[0], 0, 0]
-      m.SetElement(0, 3, position[0]); m.SetElement(1, 3, position[1]); m.SetElement(2, 3, position[2])
+        m.SetElement(0, 3, coordinates[0])
+      else:
+        m.SetElement(0, 3, coordinates[0]); m.SetElement(1, 3, coordinates[1]); m.SetElement(2, 3, coordinates[2])
       self.scanPlane1TransformNode.SetMatrixTransformToParent(m)
     elif plane == 'AX':
       # Set rotation
@@ -1448,16 +1522,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       m.SetElement(2, 0, 0); m.SetElement(2, 1, 0); m.SetElement(2, 2, 1)
       # Set translation
       if sliceOnly:
-        position = [0,0, coordinates[2]]
-      m.SetElement(0, 3, position[0]); m.SetElement(1, 3, position[1]); m.SetElement(2, 3, position[2])
+        m.SetElement(2, 3, coordinates[2])
+      else:
+        m.SetElement(0, 3, coordinates[0]); m.SetElement(1, 3, coordinates[1]); m.SetElement(2, 3, coordinates[2])
       self.scanPlane2TransformNode.SetMatrixTransformToParent(m)
     else: #Other - Still not supported
       print('Invalid plane option')
 
-  def updateScanPlane(self, checkConfidence=True, plane='COR', sliceOnly=True):
+  # Chooses which scan to update
+  def updateScanPlane(self, checkConfidence=True, plane='COR', sliceOnly=False, logFlag=False):
     # Define update confidence criteria
     if checkConfidence:
-      confidentUpdate = self.needleConfidenceNode.GetText() != 'None'
+      if (self.needleConfidenceNode.GetText() != 'None') and (self.needleConfidenceNode.GetText() != 'Low'):
+        confidentUpdate = True
+      else:
+        confidentUpdate = False
     else:
       confidentUpdate = True
       
@@ -1477,12 +1556,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Get current tip transform
       tip_matrix = vtk.vtkMatrix4x4()
       self.tipTrackedNode.GetMatrixTransformToParent(tip_matrix)
-      # Update transform with current tip
-      if not sliceOnly: # Update all coordinates
-          plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
-          plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
-          plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))      
-      else:             # Update only slice coordinate
+      # Set matrix with current tip
+      if (sliceOnly is False): # Update all coordinates
+        print('Update all coordinates of slice')
+        plane_matrix.SetElement(0, 3, tip_matrix.GetElement(0, 3))
+        plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
+        plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))      
+      else:                   # Update only slice coordinate
         if plane == 'COR':
           plane_matrix.SetElement(1, 3, tip_matrix.GetElement(1, 3))
           self.scanPlane0TransformNode.SetMatrixTransformToParent(plane_matrix)
@@ -1492,8 +1572,25 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         elif plane == 'AX':
           plane_matrix.SetElement(2, 3, tip_matrix.GetElement(2, 3))
           self.scanPlane2TransformNode.SetMatrixTransformToParent(plane_matrix)
+      # Update plane transform node
+      if plane == 'COR':    # PLAN_0
+        self.scanPlane0TransformNode.SetMatrixTransformToParent(plane_matrix) 
+      elif plane == 'SAG':  # PLAN_1
+        self.scanPlane1TransformNode.SetMatrixTransformToParent(plane_matrix)
+      elif plane == 'AX':   # PLAN_2
+        self.scanPlane2TransformNode.SetMatrixTransformToParent(plane_matrix)          
     else:
       print('Scan plane NOT updated - No confidence on needle tracking')
+      
+    if logFlag:
+      scanPlaneCenter = [plane_matrix.GetElement(0,3), plane_matrix.GetElement(1,3), plane_matrix.GetElement(2,3)]
+      if plane=='COR':
+        print('PLAN_0 = %s' %scanPlaneCenter)
+      elif plane=='SAG':
+        print('PLAN_1 = %s' %scanPlaneCenter)
+      elif plane=='AX':
+        print('PLAN_2 = %s' %scanPlaneCenter)
+      
     return
 
   def pushScanPlaneToIGTLink(self, connectionNode, plane='COR'):
@@ -1538,10 +1635,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, firstVolume, secondVolume, inputMode, inputVolume, windowSize=64, in_channels=2, out_channels=3, minTip=10, minShaft=30, debugFlag=False):    
+  def getNeedle(self, firstVolume, secondVolume, inputMode, inputVolume, windowSize=64, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
     self.count += 1    
-
+    print('Image #%i' %self.count)
     ######################################
     ##                                  ##
     ## Step 0: Set input images         ##
@@ -1565,17 +1662,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m', debugFlag=debugFlag)
-      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p', debugFlag=debugFlag)
-      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug'))
-      self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
+      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
+      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+      self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if in_channels == 3:
-        self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a', debugFlag=debugFlag)
-        self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+        self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
+        self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if self.sitk_mask is not None:
         sitk_mask = sitk.Cast(self.sitk_mask, sitk.sitkUInt8)
-        self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask', debugFlag=debugFlag)
-        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(self.count), path=os.path.join(self.path, 'Debug'))
+        self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask')
+        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
 
     ######################################
     ##                                  ##
@@ -1624,9 +1721,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     inference_time = time.time() - start_time
         
     # Push segmentation to Slicer
-    self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode, debugFlag=debugFlag)
+    self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode)
     if debugFlag:
-      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug'), is_label=True)
+      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
     ######################################
     ##                                  ##
@@ -1652,8 +1749,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         
     # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
-    if debugFlag:
-      # self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip', debugFlag=debugFlag)
+    # if debugFlag:
+      # self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip')
+    if logFlag:
       if tip_dict is not None:
         for element in tip_dict:
           print('Tip Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
@@ -1670,8 +1768,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_shaft = self.connectShaftGaps(sitk_shaft)
     # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
-    if debugFlag:
-      # self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft', debugFlag=debugFlag)
+    # if debugFlag:
+      # self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft')
+    if logFlag:
       if shaft_dict is not None:
         for element in shaft_dict:
           print('Shaft Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
@@ -1752,11 +1851,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
               shaft_size = shaft_size2
               sitk_selected_shaft = sitk_selected_shaft2  
             
-    if debugFlag:
-      print('Selected tip = %s' %str(tip_label))  
-      print('Selected shaft = %s' %str(shaft_label))  
-      print('Connected = %s' %connected)
-    
+    if logFlag:
+      print('SELECTED: tip = %s, shaft = %s, connected = %s ' %(tip_label, shaft_label, connected))  
+
     ######################################
     ##                                  ##
     ## Step 6: Set confidence for tip   ##
@@ -1768,10 +1865,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if tip_label is None: 
       # NO TIP and NO SHAFT
       if shaft_label is None:
-        if debugFlag:
-          print('Tip coordinates: None')
-          print('Confidence: None')
-        return (None, plane, inference_time)  # NONE (no tip, no shaft)
+        if logFlag:
+          print('Segmented tip = None')
+        return (None, inference_time)  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
@@ -1814,11 +1910,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ####################################
 
     # Convert to 3D Slicer coordinates (RAS)
-    centerRAS = (-tip_center[0], -tip_center[1], tip_center[2])     
+    centerRAS = [-tip_center[0], -tip_center[1], tip_center[2]]
     # # Plot
-    if debugFlag:
-      print('Tip coordinates: ' + str(centerRAS))
-      print('Confidence: ' + confidence)
+    if logFlag:
+      print('Segmented tip = %s' %centerRAS)
 
     # Push coordinates to tip Node
     transformMatrix = vtk.vtkMatrix4x4()
@@ -1841,28 +1936,29 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Update tracked tip L/R and I/S coordinates
         tip_matrix.SetElement(0,3, centerRAS[0])
         tip_matrix.SetElement(2,3, centerRAS[2])
-        if self.tipDetected == False:
+        if self.tipDetected == False: # Use slice coordinates if first estimate
+          self.tipDetected = True
           tip_matrix.SetElement(1,3, centerRAS[1])
       elif plane == 'SAG':
       # Update tracked tip A/P and I/S coordinates
         tip_matrix.SetElement(1,3, centerRAS[1])
         tip_matrix.SetElement(2,3, centerRAS[2])      
-        if self.tipDetected == False:
+        if self.tipDetected == False: # Use slice coordinates if first estimate
+          self.tipDetected = True
           tip_matrix.SetElement(0,3, centerRAS[0])
       elif plane == 'AX':
       # Update tracked tip L/R and A/P coordinates
         tip_matrix.SetElement(0,3, centerRAS[0])
         tip_matrix.SetElement(1,3, centerRAS[1])      
-        if self.tipDetected == False:
+        if self.tipDetected == False: # Use slice coordinates if first estimate
+          self.tipDetected = True
           tip_matrix.SetElement(2,3, centerRAS[2])
-      self.tipDetected = True
       self.tipTrackedNode.SetMatrixTransformToParent(tip_matrix)
-      if debugFlag:
-        tracked = (tip_matrix.GetElement(0,3), tip_matrix.GetElement(1,3), tip_matrix.GetElement(2,3))
-        print('Tracked coordinates: ' + str(tracked))
-
+      if logFlag:
+        tracked = [tip_matrix.GetElement(0,3), tip_matrix.GetElement(1,3), tip_matrix.GetElement(2,3)]
+        print('Tracked tip = %s' %tracked)
     # Push confidence to Node
     self.needleConfidenceNode.SetText(confidence) 
-    return (confidence, plane, inference_time)
+    return (confidence, inference_time)
   
   ############################################
