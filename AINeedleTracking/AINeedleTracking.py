@@ -125,16 +125,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputHBoxLayout.addWidget(self.inputVolume2D)
     inputHBoxLayout.addWidget(self.inputVolume3D)
     inputHBoxLayout.addWidget(hSpacer)
-    # self.inputChannels1 = qt.QRadioButton('1 CH')
+    self.inputChannels1 = qt.QRadioButton('1 CH')
     self.inputChannels2 = qt.QRadioButton('2 CH')
     self.inputChannels3 = qt.QRadioButton('3 CH')
     self.inputChannels2.checked = 1
     self.inputChannelsButtonGroup = qt.QButtonGroup()
-    # self.inputChannelsButtonGroup.addButton(self.inputChannels1)
+    self.inputChannelsButtonGroup.addButton(self.inputChannels1)
     self.inputChannelsButtonGroup.addButton(self.inputChannels2)
     self.inputChannelsButtonGroup.addButton(self.inputChannels3)
     inputHBoxLayout.addWidget(qt.QLabel('Input Channels:'))
-    # inputHBoxLayout.addWidget(self.inputChannels1)
+    inputHBoxLayout.addWidget(self.inputChannels1)
     inputHBoxLayout.addWidget(self.inputChannels2)
     inputHBoxLayout.addWidget(self.inputChannels3)
     setupFormLayout.addRow(inputHBoxLayout)
@@ -507,6 +507,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputVolume2D.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputVolume3D.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.inputChannels1.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputChannels2.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputChannels3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.firstVolumeSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
@@ -545,6 +546,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
     self.inputVolume2D.connect("toggled(bool)", self.updateModelList)
     self.inputVolume3D.connect("toggled(bool)", self.updateModelList)
+    self.inputChannels1.connect("toggled(bool)", self.updateModelList)
     self.inputChannels2.connect("toggled(bool)", self.updateModelList)
     self.inputChannels3.connect("toggled(bool)", self.updateModelList)
     
@@ -664,6 +666,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeRealImag.checked = (self._parameterNode.GetParameter('InputMode') == 'RealImag')
     self.inputVolume2D.checked = (self._parameterNode.GetParameter('InputVolume') == '2D')
     self.inputVolume3D.checked = (self._parameterNode.GetParameter('InputVolume') == '3D')
+    self.inputChannels1.checked = (self._parameterNode.GetParameter('InputChannels') == '1CH')
     self.inputChannels2.checked = (self._parameterNode.GetParameter('InputChannels') == '2CH')
     self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3CH')
     self.logFlagCheckBox.checked = (self._parameterNode.GetParameter('ScreenLog') == 'True')
@@ -703,7 +706,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('Mask', self.segmentationMaskSelector.currentNodeID)
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('InputVolume', '2D' if self.inputVolume2D.checked else '3D')
-    self._parameterNode.SetParameter('InputChannels', '2CH' if self.inputChannels2.checked else '3CH')
+    self._parameterNode.SetParameter('InputChannels', '1CH' if self.inputChannels1.checked else '2CH' if self.inputChannels2.checked else '3CH')
     self._parameterNode.SetParameter('ScreenLog', 'True' if self.logFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('DebugName', self.debugNameTextbox.text.strip())    
@@ -745,6 +748,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputModeRealImag.enabled = True
       self.inputVolume2D.enabled = True
       self.inputVolume3D.enabled = True
+      self.inputChannels1.enabled = True
       self.inputChannels2.enabled = True
       self.inputChannels3.enabled = True
       self.modelFileSelector.enabled = True
@@ -845,6 +849,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputModeRealImag.enabled = False
       self.inputVolume2D.enabled = False
       self.inputVolume3D.enabled = False
+      self.inputChannels1.enabled = False
       self.inputChannels2.enabled = False
       self.inputChannels3.enabled = False
       self.modelFileSelector.enabled = False
@@ -883,12 +888,17 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.minTipSizeWidget.setEnabled(False)
       self.minShaftSizeWidget.setEnabled(False)      
     # Check if Tracking is enabled
-    rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
+    if self.inputChannels1.checked:
+      rtNodesDefined = self.firstVolumeSelector.currentNode()
+    else:
+      rtNodesDefined = self.firstVolumeSelector.currentNode() and self.secondVolumeSelector.currentNode()
     self.startTrackingButton.enabled = rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
   
   def updateModelList(self):
-    if self.inputChannels2.checked:
+    if self.inputChannels1.checked:
+      channels = '1'
+    elif self.inputChannels2.checked:
       channels = '2'
     else:
       channels = '3'
@@ -962,7 +972,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.segmentationNode = self.segmentationMaskSelector.currentNode()
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
     self.inputVolume = 2 if self.inputVolume2D.checked else 3
-    self.inputChannels = 2 if self.inputChannels2.checked else 3
+    self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
     self.centerScanAtTip = self.centerAtTipCheckBox.checked 
     self.serverNode = self.bridgeConnectionSelector.currentNode()
@@ -990,7 +1000,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Check for needle in the current images
     self.getNeedle() 
     # Create listener to image sequence node
-    self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
+    if self.inputChannels==1:
+      self.addObserver(self.firstVolume, self.firstVolume.ImageDataModifiedEvent, self.receivedImage)
+    else:
+      self.addObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   def stopTracking(self):
     self.isTrackingOn = False
@@ -1007,7 +1020,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('Mean Inference Time: %.2f+-%.2f' %(mean_value, std_deviation))
     #TODO: Define what should to be refreshed
     print('UI: stopTracking()')
-    self.removeObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
+    if self.inputChannels==1:
+      self.removeObserver(self.firstVolume, self.firstVolume.ImageDataModifiedEvent, self.receivedImage)
+    else:
+      self.removeObserver(self.secondVolume, self.secondVolume.ImageDataModifiedEvent, self.receivedImage)
   
   # Send PLAN_0 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane0(self):
@@ -1650,10 +1666,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       (sitk_img_m, sitk_img_p) = self.realImagToMagPhase(firstVolume, secondVolume)
     else:                         # Already as magnitude/phase
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
-      sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
+      if (in_channels!=1):
+        sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
     # Cast it to 32Float
     sitk_img_m = sitk.Cast(sitk_img_m, sitk.sitkFloat32)
-    sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
+    if (in_channels!=1):
+      sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # 3-channels input
     if in_channels == 3:
       (sitk_img_a, sitk_img_dummy) = self.realImagToMagPhase(firstVolume, secondVolume)
@@ -1663,9 +1681,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
-      self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
+      if (in_channels!=1):
+        self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
       self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
-      self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+      if (in_channels!=1):
+        self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if in_channels == 3:
         self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
         self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
