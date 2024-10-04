@@ -1,9 +1,13 @@
 # AINeedleTracking-3DSlicer
 
 ## Installation:
-First, use the PyTorch Utils module to install the appropriate torch version in 3DSlicer: 
-https://github.com/fepegar/SlicerPyTorch
+First, install the appropriate torch version in 3DSlicer.
 
+Use the PyTorch Utils module (https://github.com/fepegar/SlicerPyTorch)
+
+OR
+
+install it manually using 3D Slicer Python Interactor (and adjusting the url for the appropriate version):
 ```
 slicer.util.pip_install("torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
 ```
