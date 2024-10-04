@@ -4,6 +4,10 @@
 First, use the PyTorch Utils module to install the appropriate torch version in 3DSlicer: 
 https://github.com/fepegar/SlicerPyTorch
 
+```
+slicer.util.pip_install("torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu")
+```
+
 Then, install the following python packages to 3D Slicer (use 3D Slicer Python Interactor):
 ```
 slicer.util.pip_install('monai[all]')
