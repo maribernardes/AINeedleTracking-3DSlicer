@@ -22,6 +22,7 @@ from monai.inferers import sliding_window_inference
 from monai.data import decollate_batch
 from monai.handlers.utils import from_engine
 
+
 class AINeedleTracking(ScriptedLoadableModule):
 
   def __init__(self, parent):
@@ -103,33 +104,34 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
     #### Model configuration ####
     sectionModel = SeparatorWidget('Model Selection')
-    setupFormLayout.addRow(sectionModel)
-    
+    setupFormLayout.addRow(sectionModel)    
+    inputHBoxLayout1 = qt.QHBoxLayout()
+    hSpacer = qt.QSpacerItem(20, 20, qt.QSizePolicy.Fixed, qt.QSizePolicy.Minimum)
+
+    inputHBoxLayout1.addWidget(qt.QLabel('Input Mode:'))
     self.inputModeMagPhase = qt.QRadioButton('Mag/Phase')
     self.inputModeRealImag = qt.QRadioButton('Real/Imag')
     self.inputModeMagPhase.checked = 1
     self.inputModeButtonGroup = qt.QButtonGroup()
     self.inputModeButtonGroup.addButton(self.inputModeMagPhase)
-    self.inputModeButtonGroup.addButton(self.inputModeRealImag)
-    inputHBoxLayout1 = qt.QHBoxLayout()
-    inputHBoxLayout1.addWidget(qt.QLabel('Input Mode:'))
+    self.inputModeButtonGroup.addButton(self.inputModeRealImag)    
     inputHBoxLayout1.addWidget(self.inputModeMagPhase)
     inputHBoxLayout1.addWidget(self.inputModeRealImag)
-    hSpacer1 = qt.QWidget()
-    hSpacer1.setFixedWidth(60)
-    inputHBoxLayout1.addWidget(hSpacer1)
+    inputHBoxLayout1.addStretch(1)
+    
+    inputHBoxLayout1.addWidget(qt.QLabel('Input Volume:'))
     self.inputVolume2D = qt.QRadioButton('2D (single slice)')
     self.inputVolume3D = qt.QRadioButton('3D (stack)')
     self.inputVolume2D.checked = 1
     self.inputVolumeButtonGroup = qt.QButtonGroup()
     self.inputVolumeButtonGroup.addButton(self.inputVolume2D)
     self.inputVolumeButtonGroup.addButton(self.inputVolume3D)
-    inputHBoxLayout1.addWidget(qt.QLabel('Input Volume:'))
     inputHBoxLayout1.addWidget(self.inputVolume2D)
     inputHBoxLayout1.addWidget(self.inputVolume3D)
     setupFormLayout.addRow(inputHBoxLayout1)
 
     inputHBoxLayout2 = qt.QHBoxLayout()
+    inputHBoxLayout2.addWidget(qt.QLabel('Input Channels:'))
     self.inputChannels1 = qt.QRadioButton('1 CH')
     self.inputChannels2 = qt.QRadioButton('2 CH')
     self.inputChannels3 = qt.QRadioButton('3 CH')
@@ -138,13 +140,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannelsButtonGroup.addButton(self.inputChannels1)
     self.inputChannelsButtonGroup.addButton(self.inputChannels2)
     self.inputChannelsButtonGroup.addButton(self.inputChannels3)
-    inputHBoxLayout2.addWidget(qt.QLabel('Input Channels:'))
     inputHBoxLayout2.addWidget(self.inputChannels1)
     inputHBoxLayout2.addWidget(self.inputChannels2)
     inputHBoxLayout2.addWidget(self.inputChannels3)
-    hSpacer2 = qt.QWidget()
-    hSpacer2.setFixedWidth(350)
-    inputHBoxLayout2.addWidget(hSpacer2)
+    inputHBoxLayout2.addStretch(1)
     setupFormLayout.addRow(inputHBoxLayout2)
     
     self.modelFileSelector = qt.QComboBox()
@@ -186,7 +185,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane0HBoxLayout.addWidget(self.scenePlane0Button_green)
     self.sendPlane0Button = qt.QPushButton('Set PLANE_0')
     self.sendPlane0Button.toolTip = 'Send PLANE_0 to scanner'
-    self.sendPlane0Button.setFixedWidth(170)
+    self.sendPlane0Button.setFixedWidth(130)
     self.sendPlane0Button.enabled = False
     plane0HBoxLayout.addWidget(self.sendPlane0Button)
     setupFormLayout.addRow(plane0HBoxLayout)   
@@ -219,7 +218,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane1HBoxLayout.addWidget(self.scenePlane1Button_green)
     self.sendPlane1Button = qt.QPushButton('Set PLANE_1')
     self.sendPlane1Button.toolTip = 'Send PLANE_1 to scanner'
-    self.sendPlane1Button.setFixedWidth(170)
+    self.sendPlane1Button.setFixedWidth(130)
     self.sendPlane1Button.enabled = False
     plane1HBoxLayout.addWidget(self.sendPlane1Button)
     setupFormLayout.addRow(plane1HBoxLayout)   
@@ -252,7 +251,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     plane2HBoxLayout.addWidget(self.scenePlane2Button_green)
     self.sendPlane2Button = qt.QPushButton('Set PLANE_2')
     self.sendPlane2Button.toolTip = 'Send PLANE_2 to scanner'
-    self.sendPlane2Button.setFixedWidth(170)
+    self.sendPlane2Button.setFixedWidth(130)
     self.sendPlane2Button.enabled = False
     plane2HBoxLayout.addWidget(self.sendPlane2Button)
     setupFormLayout.addRow(plane2HBoxLayout)
@@ -284,11 +283,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.centerAtTipCheckBox = qt.QCheckBox()
     self.centerAtTipCheckBox.checked = False
     self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
-    hSpacer3 = qt.QWidget()
-    hSpacer3.setFixedWidth(100)
+    
     autoUpdateHBoxLayout.addWidget(autoUpdateLabel)
     autoUpdateHBoxLayout.addWidget(self.updateScanPlaneCheckBox)
-    autoUpdateHBoxLayout.addWidget(hSpacer3)
+    autoUpdateHBoxLayout.addItem(hSpacer)
     autoUpdateHBoxLayout.addWidget(centerAtTipLabel)
     autoUpdateHBoxLayout.addWidget(self.centerAtTipCheckBox)
     autoUpdateHBoxLayout.addStretch()
@@ -456,14 +454,15 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushTargetToRobotCheckBox.setToolTip('If checked, pushes target position to robot in zFrame coordinates')
     igtlHBoxLayout.addWidget(qt.QLabel('Push Target to Robot'))
     igtlHBoxLayout.addWidget(self.pushTargetToRobotCheckBox)
-
+    igtlHBoxLayout.addItem(hSpacer)
+    
     # Push tip coordinates to robot
     self.pushTipToRobotCheckBox = qt.QCheckBox()
     self.pushTipToRobotCheckBox.checked = False
     self.pushTipToRobotCheckBox.setToolTip('If checked, pushes current tip position to robot in zFrame coordinates')
     igtlHBoxLayout.addWidget(qt.QLabel('Push Tip to Robot'))
     igtlHBoxLayout.addWidget(self.pushTipToRobotCheckBox)
-
+    igtlHBoxLayout.addStretch()
     optionalFormLayout.addRow(igtlHBoxLayout)
     
     # Select Robot OpenIGTLink connection
@@ -553,7 +552,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.debugNameTextbox.enabled = False
     saveHBoxLayout.addWidget(debugLabel)
     saveHBoxLayout.addWidget(self.debugFlagCheckBox)
-    saveHBoxLayout.addWidget(hSpacer1)    
+    saveHBoxLayout.addItem(hSpacer)    
     saveHBoxLayout.addWidget(self.debugNameTextbox)  
     saveHBoxLayout.addStretch()  
     advancedFormLayout.addRow(saveHBoxLayout)    
@@ -1295,9 +1294,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.fileWriter = sitk.ImageFileWriter()
     
     # Input image masking
-    self.maskFilter = sitk.LabelMapMaskImageFilter()
-    self.maskFilter.SetBackgroundValue(0)
-    self.maskFilter.SetNegated(False)
     self.sitk_mask0 = None
     self.sitk_mask1 = None
     self.sitk_mask2 = None
@@ -1604,8 +1600,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_mask = sitkUtils.PullVolumeFromSlicer(maskLabelMapNode)
       # Remove temporary labelmap node
       slicer.mrmlScene.RemoveNode(maskLabelMapNode)
-      # Cast to valid type to be used with sitkMaskFilter
-      return sitk.Cast(sitk_mask, sitk.sitkLabelUInt8)
+      return sitk_mask
     else:
       return None
   
@@ -1960,8 +1955,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Apply segmentation mask (optional)
     if sitk_mask is not None:
       sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
-      sitk_output = self.maskFilter.Execute(sitk_mask, sitk_output) # Apply mask to labels
-
+      sitk_output = sitk.Mask(sitk_output, sitk_mask)
     
     ######################################
     ##                                  ##
