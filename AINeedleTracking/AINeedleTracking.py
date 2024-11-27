@@ -112,7 +112,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputHBoxLayout1 = qt.QHBoxLayout()
     hSpacer = qt.QSpacerItem(20, 20, qt.QSizePolicy.Fixed, qt.QSizePolicy.Minimum)
 
-    inputHBoxLayout1.addWidget(qt.QLabel('Input Mode:'))
+    inputHBoxLayout1.addWidget(qt.QLabel('Mode:'))
     self.inputModeMagPhase = qt.QRadioButton('Mag/Phase')
     self.inputModeRealImag = qt.QRadioButton('Real/Imag')
     self.inputModeMagPhase.checked = 1
@@ -121,11 +121,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputModeButtonGroup.addButton(self.inputModeRealImag)    
     inputHBoxLayout1.addWidget(self.inputModeMagPhase)
     inputHBoxLayout1.addWidget(self.inputModeRealImag)
-    inputHBoxLayout1.addItem(hSpacer)
-    inputHBoxLayout1.addItem(hSpacer)
-    inputHBoxLayout1.addItem(hSpacer)
-    
-    inputHBoxLayout1.addWidget(qt.QLabel('Input Volume:'))
+    # inputHBoxLayout1.addItem(hSpacer)
+    inputHBoxLayout1.addStretch(1)
+
+    inputHBoxLayout1.addWidget(qt.QLabel('Volume:'))
     self.inputVolume2D = qt.QRadioButton('2D (single slice)')
     self.inputVolume3D = qt.QRadioButton('3D (stack)')
     self.inputVolume2D.checked = 1
@@ -134,11 +133,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputVolumeButtonGroup.addButton(self.inputVolume3D)
     inputHBoxLayout1.addWidget(self.inputVolume2D)
     inputHBoxLayout1.addWidget(self.inputVolume3D)
+    # inputHBoxLayout1.addItem(hSpacer)
     inputHBoxLayout1.addStretch(1)
-    setupFormLayout.addRow(inputHBoxLayout1)
+    # setupFormLayout.addRow(inputHBoxLayout1)
 
-    inputHBoxLayout2 = qt.QHBoxLayout()
-    inputHBoxLayout2.addWidget(qt.QLabel('Input Channels:'))
+    # inputHBoxLayout2 = qt.QHBoxLayout()
+    inputHBoxLayout1.addWidget(qt.QLabel('Channels:'))
     self.inputChannels1 = qt.QRadioButton('1 CH')
     self.inputChannels2 = qt.QRadioButton('2 CH')
     self.inputChannels3 = qt.QRadioButton('3 CH')
@@ -147,11 +147,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannelsButtonGroup.addButton(self.inputChannels1)
     self.inputChannelsButtonGroup.addButton(self.inputChannels2)
     self.inputChannelsButtonGroup.addButton(self.inputChannels3)
-    inputHBoxLayout2.addWidget(self.inputChannels1)
-    inputHBoxLayout2.addWidget(self.inputChannels2)
-    inputHBoxLayout2.addWidget(self.inputChannels3)
-    inputHBoxLayout2.addStretch(1)
-    setupFormLayout.addRow(inputHBoxLayout2)
+    inputHBoxLayout1.addWidget(self.inputChannels1)
+    inputHBoxLayout1.addWidget(self.inputChannels2)
+    inputHBoxLayout1.addWidget(self.inputChannels3)
+    # inputHBoxLayout1.addStretch(1)
+    setupFormLayout.addRow(inputHBoxLayout1)
     
     self.modelFileSelector = qt.QComboBox()
     self.modelPath= os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Models')
@@ -162,15 +162,89 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     sectionScanPlane = SeparatorWidget('MRI Scan Planes')
     setupFormLayout.addRow(sectionScanPlane)
 
-    # Select which scene view to initialize PLAN_0 and send to scanner
-    plane0HBoxLayout = qt.QHBoxLayout()
+
+    # Create the main grid layout
+    scanPlanesGridLayout = qt.QGridLayout()
+
+    # Select which scan planes to use
+    selectPlanesTitle = qt.QLabel('Select Scan Planes')
+    selectPlanesTitle.setAlignment(qt.Qt.AlignCenter)  # Center-align the title
+    # selectPlanesTitle.setStyleSheet('text-decoration: underline;')
+    scanPlanesGridLayout.addWidget(selectPlanesTitle, 0, 0, 1, 2)  # Span 2 columns for centering
+
     plane0Label = qt.QLabel('PLANE_0 (COR):')
     plane0Label.setFixedWidth(105)
     self.usePlane0CheckBox = qt.QCheckBox()
     self.usePlane0CheckBox.checked = False
     self.usePlane0CheckBox.setToolTip('If checked, uses CORONAL scan plane')    
-    set0Label = qt.QLabel('Manual set:')
-    set0Label.setToolTip('Set position for PLANE_0')
+    plane1Label = qt.QLabel('PLANE_1 (SAG):')
+    plane1Label.setFixedWidth(105)
+    self.usePlane1CheckBox = qt.QCheckBox()
+    self.usePlane1CheckBox.checked = False
+    self.usePlane1CheckBox.setToolTip('If checked, uses SAGITTAL scan plane')    
+    plane2Label = qt.QLabel('PLANE_2 (AX):')
+    plane2Label.setFixedWidth(105)
+    self.usePlane2CheckBox = qt.QCheckBox()
+    self.usePlane2CheckBox.checked = False
+    self.usePlane2CheckBox.setToolTip('If checked, uses AXIAL scan plane')    
+
+    scanPlanesGridLayout.addWidget(plane0Label, 2, 0)
+    scanPlanesGridLayout.addWidget(self.usePlane0CheckBox, 2, 1)
+    scanPlanesGridLayout.addWidget(plane1Label, 3, 0)
+    scanPlanesGridLayout.addWidget(self.usePlane1CheckBox, 3, 1)
+    scanPlanesGridLayout.addWidget(plane2Label, 4, 0)
+    scanPlanesGridLayout.addWidget(self.usePlane2CheckBox, 4, 1)
+
+    # Add a vertical separator
+    separator = qt.QFrame()
+    separator.setFrameShape(qt.QFrame.VLine)  # Vertical line
+    separator.setFrameShadow(qt.QFrame.Sunken)  # Sunken style for 3D effect
+    scanPlanesGridLayout.addWidget(separator, 0, 2, 5, 1)  # Spans 3 rows
+
+    # Select which scene view to initialize PLAN_0 and send to scanner
+    setPlanesTitle = qt.QLabel('Update Scan Planes')
+    setPlanesTitle.setAlignment(qt.Qt.AlignCenter)  # Center-align the title
+    # setPlanesTitle.setStyleSheet('text-decoration: underline;')
+    scanPlanesGridLayout.addWidget(setPlanesTitle, 0, 5, 1, 6)  # Span 2 columns for centering
+
+    # Select MRI Bridge OpenIGTLink connection
+    bridgeConnectionLabel = qt.QLabel('IGTLServer MRI:')
+    self.bridgeConnectionSelector = slicer.qMRMLNodeComboBox()
+    self.bridgeConnectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
+    self.bridgeConnectionSelector.selectNodeUponCreation = True
+    self.bridgeConnectionSelector.addEnabled = False
+    self.bridgeConnectionSelector.removeEnabled = False
+    self.bridgeConnectionSelector.noneEnabled = True
+    self.bridgeConnectionSelector.showHidden = False
+    self.bridgeConnectionSelector.showChildNodeTypes = False
+    self.bridgeConnectionSelector.setMRMLScene(slicer.mrmlScene)
+    self.bridgeConnectionSelector.setToolTip('Select MRI Bridge OpenIGTLink connection')
+    self.bridgeConnectionSelector.enabled = False
+    scanPlanesGridLayout.addWidget(bridgeConnectionLabel, 1, 3, 1, 1, qt.Qt.AlignLeft)  
+    scanPlanesGridLayout.addWidget(self.bridgeConnectionSelector, 1, 4, 1, 6)  
+    
+    # UpdateScanPlan check box
+    autoUpdateHBoxLayout = qt.QHBoxLayout()
+    autoUpdateLabel = qt.QLabel('Online update')
+    autoUpdateLabel.setFixedWidth(105)
+    self.updateScanPlaneCheckBox = qt.QCheckBox()
+    self.updateScanPlaneCheckBox.checked = False
+    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane automatically with current tip position')
+
+    # CenterAtTip check box
+    centerAtTipLabel = qt.QLabel('Center at tip')
+    self.centerAtTipCheckBox = qt.QCheckBox()
+    self.centerAtTipCheckBox.checked = False
+    self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
+    
+    scanPlanesGridLayout.addWidget(autoUpdateLabel, 1, 10, 1, 3, qt.Qt.AlignRight)  
+    scanPlanesGridLayout.addWidget(self.updateScanPlaneCheckBox, 1, 10, 1, 3, qt.Qt.AlignRight)  
+    scanPlanesGridLayout.addWidget(centerAtTipLabel, 1, 14)  
+    scanPlanesGridLayout.addWidget(self.centerAtTipCheckBox, 1, 15)  
+
+    # Plane 0 Configuration
+    setPlane0Label = qt.QLabel('Set PLANE_0:')
+    setPlane0Label.setToolTip('Set position for PLANE_0')
     self.setPlane0Button_ras = qt.QRadioButton('RAS')
     self.setPlane0Button_view = qt.QRadioButton('Viewer')
     self.setPlane0Button_ras.checked = 1
@@ -192,7 +266,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.rPlane0Textbox.setValidator(self.floatValidator)
     self.aPlane0Textbox.setValidator(self.floatValidator)
     self.sPlane0Textbox.setValidator(self.floatValidator)
-
     self.rPlane0Textbox.enabled = False
     self.aPlane0Textbox.enabled = False
     self.sPlane0Textbox.enabled = False
@@ -207,36 +280,27 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.scenePlane0Button_red.enabled = False
     self.scenePlane0Button_yellow.enabled = False
     self.scenePlane0Button_green.enabled = False
-    plane0HBoxLayout.addWidget(plane0Label)
-    plane0HBoxLayout.addWidget(self.usePlane0CheckBox)
-    #plane0HBoxLayout.addItem(hSpacer)
-    plane0HBoxLayout.addWidget(set0Label)
-    plane0HBoxLayout.addWidget(self.setPlane0Button_ras)
-    plane0HBoxLayout.addWidget(self.setPlane0Button_view)
-    plane0HBoxLayout.addItem(hSpacer)
-    plane0HBoxLayout.addWidget(self.rPlane0Textbox)
-    plane0HBoxLayout.addWidget(self.aPlane0Textbox)
-    plane0HBoxLayout.addWidget(self.sPlane0Textbox)
-    plane0HBoxLayout.addWidget(self.scenePlane0Button_red)
-    plane0HBoxLayout.addWidget(self.scenePlane0Button_yellow)
-    plane0HBoxLayout.addWidget(self.scenePlane0Button_green)
-    self.sendPlane0Button = qt.QPushButton('Set PLANE_0')
+    self.sendPlane0Button = qt.QPushButton('Send PLANE_0')
     self.sendPlane0Button.toolTip = 'Send PLANE_0 to scanner'
     self.sendPlane0Button.setFixedWidth(100)
     self.sendPlane0Button.enabled = False
-    plane0HBoxLayout.addItem(hSpacer)
-    plane0HBoxLayout.addWidget(self.sendPlane0Button)
-    setupFormLayout.addRow(plane0HBoxLayout)   
+
+    scanPlanesGridLayout.addWidget(setPlane0Label, 2, 3)
+    scanPlanesGridLayout.addWidget(self.setPlane0Button_ras, 2, 4)
+    scanPlanesGridLayout.addWidget(self.setPlane0Button_view, 2, 5)
+    scanPlanesGridLayout.addItem(hSpacer, 2, 6)
+    scanPlanesGridLayout.addWidget(self.rPlane0Textbox, 2, 7)
+    scanPlanesGridLayout.addWidget(self.aPlane0Textbox, 2, 8)
+    scanPlanesGridLayout.addWidget(self.sPlane0Textbox, 2, 9)
+    scanPlanesGridLayout.addWidget(self.scenePlane0Button_red, 2, 10)
+    scanPlanesGridLayout.addWidget(self.scenePlane0Button_yellow, 2, 11)
+    scanPlanesGridLayout.addWidget(self.scenePlane0Button_green, 2, 12)
+    scanPlanesGridLayout.addItem(hSpacer, 2, 13)
+    scanPlanesGridLayout.addWidget(self.sendPlane0Button, 2, 14, 1, 2)
  
     # Select which scene view to initialize PLAN_1 and send to scanner
-    plane1HBoxLayout = qt.QHBoxLayout()
-    plane1Label = qt.QLabel('PLANE_1 (SAG):')
-    plane1Label.setFixedWidth(105)
-    self.usePlane1CheckBox = qt.QCheckBox()
-    self.usePlane1CheckBox.checked = False
-    self.usePlane1CheckBox.setToolTip('If checked, uses SAGITTAL scan plane')    
-    set1Label = qt.QLabel('Manual set:')
-    set1Label.setToolTip('Set position for PLANE_1')
+    setPlane1Label = qt.QLabel('Set PLANE_1:')
+    setPlane1Label.setToolTip('Set position for PLANE_1')
     self.setPlane1Button_ras = qt.QRadioButton('RAS')
     self.setPlane1Button_view = qt.QRadioButton('Viewer')
     self.setPlane1Button_ras.checked = 1
@@ -272,36 +336,27 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.scenePlane1Button_red.enabled = False
     self.scenePlane1Button_yellow.enabled = False
     self.scenePlane1Button_green.enabled = False
-    plane1HBoxLayout.addWidget(plane1Label)
-    plane1HBoxLayout.addWidget(self.usePlane1CheckBox)
-    #plane1HBoxLayout.addItem(hSpacer)
-    plane1HBoxLayout.addWidget(set1Label)
-    plane1HBoxLayout.addWidget(self.setPlane1Button_ras)
-    plane1HBoxLayout.addWidget(self.setPlane1Button_view)
-    plane1HBoxLayout.addItem(hSpacer)
-    plane1HBoxLayout.addWidget(self.rPlane1Textbox)
-    plane1HBoxLayout.addWidget(self.aPlane1Textbox)
-    plane1HBoxLayout.addWidget(self.sPlane1Textbox)
-    plane1HBoxLayout.addWidget(self.scenePlane1Button_red)
-    plane1HBoxLayout.addWidget(self.scenePlane1Button_yellow)
-    plane1HBoxLayout.addWidget(self.scenePlane1Button_green)
-    self.sendPlane1Button = qt.QPushButton('Set PLANE_1')
+    self.sendPlane1Button = qt.QPushButton('Send PLANE_1')
     self.sendPlane1Button.toolTip = 'Send PLANE_1 to scanner'
     self.sendPlane1Button.setFixedWidth(100)
     self.sendPlane1Button.enabled = False
-    plane1HBoxLayout.addItem(hSpacer)
-    plane1HBoxLayout.addWidget(self.sendPlane1Button)
-    setupFormLayout.addRow(plane1HBoxLayout)   
+
+    scanPlanesGridLayout.addWidget(setPlane1Label, 3, 3)
+    scanPlanesGridLayout.addWidget(self.setPlane1Button_ras, 3, 4)
+    scanPlanesGridLayout.addWidget(self.setPlane1Button_view, 3, 5)
+    scanPlanesGridLayout.addItem(hSpacer, 3, 6)
+    scanPlanesGridLayout.addWidget(self.rPlane1Textbox, 3, 7)
+    scanPlanesGridLayout.addWidget(self.aPlane1Textbox, 3, 8)
+    scanPlanesGridLayout.addWidget(self.sPlane1Textbox, 3, 9)
+    scanPlanesGridLayout.addWidget(self.scenePlane1Button_red, 3, 10)
+    scanPlanesGridLayout.addWidget(self.scenePlane1Button_yellow, 3, 11)
+    scanPlanesGridLayout.addWidget(self.scenePlane1Button_green, 3, 12)
+    scanPlanesGridLayout.addItem(hSpacer, 3, 13)
+    scanPlanesGridLayout.addWidget(self.sendPlane1Button, 3, 14, 1, 2)
 
     # Select which scene view to initialize PLAN_2 and send to scanner
-    plane2HBoxLayout = qt.QHBoxLayout()
-    plane2Label = qt.QLabel('PLANE_2 (AX):')
-    plane2Label.setFixedWidth(105)
-    self.usePlane2CheckBox = qt.QCheckBox()
-    self.usePlane2CheckBox.checked = False
-    self.usePlane2CheckBox.setToolTip('If checked, uses AXIAL scan plane')    
-    set2Label = qt.QLabel('Manual set:')
-    set2Label.setToolTip('Set position for PLANE_2')
+    setPlane2Label = qt.QLabel('Set PLANE_2:')
+    setPlane2Label.setToolTip('Set position for PLANE_2')
     self.setPlane2Button_ras = qt.QRadioButton('RAS')
     self.setPlane2Button_view = qt.QRadioButton('Viewer')
     self.setPlane2Button_ras.checked = 1
@@ -337,63 +392,27 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.scenePlane2Button_red.enabled = False
     self.scenePlane2Button_yellow.enabled = False
     self.scenePlane2Button_green.enabled = False
-    plane2HBoxLayout.addWidget(plane2Label)
-    plane2HBoxLayout.addWidget(self.usePlane2CheckBox)
-    #plane2HBoxLayout.addItem(hSpacer)
-    plane2HBoxLayout.addWidget(set2Label)
-    plane2HBoxLayout.addWidget(self.setPlane2Button_ras)
-    plane2HBoxLayout.addWidget(self.setPlane2Button_view)
-    plane2HBoxLayout.addItem(hSpacer)
-    plane2HBoxLayout.addWidget(self.rPlane2Textbox)
-    plane2HBoxLayout.addWidget(self.aPlane2Textbox)
-    plane2HBoxLayout.addWidget(self.sPlane2Textbox)
-    plane2HBoxLayout.addWidget(self.scenePlane2Button_red)
-    plane2HBoxLayout.addWidget(self.scenePlane2Button_yellow)
-    plane2HBoxLayout.addWidget(self.scenePlane2Button_green)
-    self.sendPlane2Button = qt.QPushButton('Set PLANE_2')
+    self.sendPlane2Button = qt.QPushButton('Send PLANE_2')
     self.sendPlane2Button.toolTip = 'Send PLANE_2 to scanner'
     self.sendPlane2Button.setFixedWidth(100)
     self.sendPlane2Button.enabled = False
-    plane2HBoxLayout.addItem(hSpacer)
-    plane2HBoxLayout.addWidget(self.sendPlane2Button)
-    setupFormLayout.addRow(plane2HBoxLayout)
 
-    # Select MRI Bridge OpenIGTLink connection
-    self.bridgeConnectionSelector = slicer.qMRMLNodeComboBox()
-    self.bridgeConnectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
-    self.bridgeConnectionSelector.selectNodeUponCreation = True
-    self.bridgeConnectionSelector.addEnabled = False
-    self.bridgeConnectionSelector.removeEnabled = False
-    self.bridgeConnectionSelector.noneEnabled = True
-    self.bridgeConnectionSelector.showHidden = False
-    self.bridgeConnectionSelector.showChildNodeTypes = False
-    self.bridgeConnectionSelector.setMRMLScene(slicer.mrmlScene)
-    self.bridgeConnectionSelector.setToolTip('Select MRI Bridge OpenIGTLink connection')
-    self.bridgeConnectionSelector.enabled = False
-    setupFormLayout.addRow('IGTLServer MRI:', self.bridgeConnectionSelector)
+    scanPlanesGridLayout.addWidget(setPlane2Label, 4, 3)
+    scanPlanesGridLayout.addWidget(self.setPlane2Button_ras, 4, 4)
+    scanPlanesGridLayout.addWidget(self.setPlane2Button_view, 4, 5)
+    scanPlanesGridLayout.addItem(hSpacer, 4, 6)
+    scanPlanesGridLayout.addWidget(self.rPlane2Textbox, 4, 7)
+    scanPlanesGridLayout.addWidget(self.aPlane2Textbox, 4, 8)
+    scanPlanesGridLayout.addWidget(self.sPlane2Textbox, 4, 9)
+    scanPlanesGridLayout.addWidget(self.scenePlane2Button_red, 4, 10)
+    scanPlanesGridLayout.addWidget(self.scenePlane2Button_yellow, 4, 11)
+    scanPlanesGridLayout.addWidget(self.scenePlane2Button_green, 4, 12)
+    scanPlanesGridLayout.addItem(hSpacer, 4, 13)
+    scanPlanesGridLayout.addWidget(self.sendPlane2Button, 4, 14, 1, 2)
 
-    # UpdateScanPlan check box
-    autoUpdateHBoxLayout = qt.QHBoxLayout()
-    autoUpdateLabel = qt.QLabel('Online update')
-    autoUpdateLabel.setFixedWidth(105)
-    self.updateScanPlaneCheckBox = qt.QCheckBox()
-    self.updateScanPlaneCheckBox.checked = False
-    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane automatically with current tip position')
-
-    # CenterAtTip check box
-    centerAtTipLabel = qt.QLabel('Center at tip')
-    self.centerAtTipCheckBox = qt.QCheckBox()
-    self.centerAtTipCheckBox.checked = False
-    self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
-    
-    autoUpdateHBoxLayout.addWidget(autoUpdateLabel)
-    autoUpdateHBoxLayout.addWidget(self.updateScanPlaneCheckBox)
-    autoUpdateHBoxLayout.addItem(hSpacer)
-    autoUpdateHBoxLayout.addItem(hSpacer)
-    autoUpdateHBoxLayout.addWidget(centerAtTipLabel)
-    autoUpdateHBoxLayout.addWidget(self.centerAtTipCheckBox)
-    autoUpdateHBoxLayout.addStretch()
-    setupFormLayout.addRow(autoUpdateHBoxLayout)   
+    scanPlanesWidget = qt.QWidget()
+    scanPlanesWidget.setLayout(scanPlanesGridLayout)
+    setupFormLayout.addRow(scanPlanesWidget)
     
     ## Needle Tracking                
     ####################################
@@ -1066,34 +1085,42 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.centerAtTipCheckBox.enabled = False
       # PLAN_0
       if self.usePlane0CheckBox.checked:
-        self.setPlane0Button_ras.enabled = True
-        self.setPlane0Button_view.enabled = True
         self.firstVolumePlane0Selector.enabled = True
         self.secondVolumePlane0Selector.enabled = True
         self.segmentationMaskPlane0Selector.enabled = True
-        if self.setPlane0Button_view.checked:
-          self.scenePlane0Button_red.enabled = True
-          self.scenePlane0Button_yellow.enabled = True
-          self.scenePlane0Button_green.enabled = True    
-          self.rPlane0Textbox.enabled = False
-          self.aPlane0Textbox.enabled = False
-          self.sPlane0Textbox.enabled = False
-          if serverDefined:
+        if serverDefined:
+          self.setPlane0Button_ras.enabled = True
+          self.setPlane0Button_view.enabled = True
+          if self.setPlane0Button_view.checked:
+            self.scenePlane0Button_red.enabled = True
+            self.scenePlane0Button_yellow.enabled = True
+            self.scenePlane0Button_green.enabled = True    
+            self.rPlane0Textbox.enabled = False
+            self.aPlane0Textbox.enabled = False
+            self.sPlane0Textbox.enabled = False
             self.sendPlane0Button.enabled = True
           else:
-            self.sendPlane0Button.enabled = False
+            self.scenePlane0Button_red.enabled = False
+            self.scenePlane0Button_yellow.enabled = False
+            self.scenePlane0Button_green.enabled = False    
+            self.rPlane0Textbox.enabled = True
+            self.aPlane0Textbox.enabled = True
+            self.sPlane0Textbox.enabled = True
+            rasDefinedPlane0 = (self.rPlane0Textbox.text.strip() and self.aPlane0Textbox.text.strip() and self.sPlane0Textbox.text.strip())
+            if rasDefinedPlane0:
+              self.sendPlane0Button.enabled = True
+            else:
+              self.sendPlane0Button.enabled = False
         else:
+          self.setPlane0Button_ras.enabled = False
+          self.setPlane0Button_view.enabled = False
           self.scenePlane0Button_red.enabled = False
           self.scenePlane0Button_yellow.enabled = False
           self.scenePlane0Button_green.enabled = False    
-          self.rPlane0Textbox.enabled = True
-          self.aPlane0Textbox.enabled = True
-          self.sPlane0Textbox.enabled = True
-          rasDefinedPlane0 = (self.rPlane0Textbox.text.strip() and self.aPlane0Textbox.text.strip() and self.sPlane0Textbox.text.strip())
-          if serverDefined and rasDefinedPlane0:
-            self.sendPlane0Button.enabled = True
-          else:
-            self.sendPlane0Button.enabled = False
+          self.rPlane0Textbox.enabled = False
+          self.aPlane0Textbox.enabled = False
+          self.sPlane0Textbox.enabled = False
+          self.sendPlane0Button.enabled = False
       else:
         self.setPlane0Button_ras.enabled = False
         self.setPlane0Button_view.enabled = False
@@ -1110,40 +1137,48 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       # PLAN_1
       if self.usePlane1CheckBox.checked:
-        self.setPlane1Button_ras.enabled = True
-        self.setPlane1Button_view.enabled = True
         self.firstVolumePlane1Selector.enabled = True
         self.secondVolumePlane1Selector.enabled = True
         self.segmentationMaskPlane1Selector.enabled = True
-        if self.setPlane1Button_view.checked:
-          self.scenePlane1Button_red.enabled = True
-          self.scenePlane1Button_yellow.enabled = True
-          self.scenePlane1Button_green.enabled = True    
-          self.rPlane1Textbox.enabled = False
-          self.aPlane1Textbox.enabled = False
-          self.sPlane1Textbox.enabled = False
-          if serverDefined:
+        if serverDefined:
+          self.setPlane1Button_ras.enabled = True
+          self.setPlane1Button_view.enabled = True
+          if self.setPlane1Button_view.checked:
+            self.scenePlane1Button_red.enabled = True
+            self.scenePlane1Button_yellow.enabled = True
+            self.scenePlane1Button_green.enabled = True    
+            self.rPlane1Textbox.enabled = False
+            self.aPlane1Textbox.enabled = False
+            self.sPlane1Textbox.enabled = False
             self.sendPlane1Button.enabled = True
           else:
-            self.sendPlane1Button.enabled = False
+            self.scenePlane1Button_red.enabled = False
+            self.scenePlane1Button_yellow.enabled = False
+            self.scenePlane1Button_green.enabled = False    
+            self.rPlane1Textbox.enabled = True
+            self.aPlane1Textbox.enabled = True
+            self.sPlane1Textbox.enabled = True
+            rasDefinedPlane1 = (self.rPlane1Textbox.text.strip() and self.aPlane1Textbox.text.strip() and self.sPlane1Textbox.text.strip())
+            if rasDefinedPlane1:
+              self.sendPlane1Button.enabled = True
+            else:
+              self.sendPlane1Button.enabled = False
         else:
+          self.setPlane1Button_ras.enabled = False
+          self.setPlane1Button_view.enabled = False
           self.scenePlane1Button_red.enabled = False
           self.scenePlane1Button_yellow.enabled = False
           self.scenePlane1Button_green.enabled = False    
-          self.rPlane1Textbox.enabled = True
-          self.aPlane1Textbox.enabled = True
-          self.sPlane1Textbox.enabled = True
-          rasDefinedPlane1 = (self.rPlane1Textbox.text.strip() and self.aPlane1Textbox.text.strip() and self.sPlane1Textbox.text.strip())
-          if serverDefined and rasDefinedPlane1:
-            self.sendPlane1Button.enabled = True
-          else:
-            self.sendPlane1Button.enabled = False
+          self.rPlane1Textbox.enabled = False
+          self.aPlane1Textbox.enabled = False
+          self.sPlane1Textbox.enabled = False
+          self.sendPlane1Button.enabled = False
       else:
         self.setPlane1Button_ras.enabled = False
         self.setPlane1Button_view.enabled = False
         self.rPlane1Textbox.enabled = False
         self.aPlane1Textbox.enabled = False
-        self.sPlane1Textbox.enabled = False    
+        self.sPlane1Textbox.enabled = False        
         self.scenePlane1Button_red.enabled = False
         self.scenePlane1Button_yellow.enabled = False
         self.scenePlane1Button_green.enabled = False
@@ -1154,40 +1189,48 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
       # PLAN_2
       if self.usePlane2CheckBox.checked:
-        self.setPlane2Button_ras.enabled = True
-        self.setPlane2Button_view.enabled = True
         self.firstVolumePlane2Selector.enabled = True
         self.secondVolumePlane2Selector.enabled = True
         self.segmentationMaskPlane2Selector.enabled = True
-        if self.setPlane2Button_view.checked:
-          self.scenePlane2Button_red.enabled = True
-          self.scenePlane2Button_yellow.enabled = True
-          self.scenePlane2Button_green.enabled = True    
-          self.rPlane2Textbox.enabled = False
-          self.aPlane2Textbox.enabled = False
-          self.sPlane2Textbox.enabled = False
-          if serverDefined:
+        if serverDefined:
+          self.setPlane2Button_ras.enabled = True
+          self.setPlane2Button_view.enabled = True
+          if self.setPlane2Button_view.checked:
+            self.scenePlane2Button_red.enabled = True
+            self.scenePlane2Button_yellow.enabled = True
+            self.scenePlane2Button_green.enabled = True    
+            self.rPlane2Textbox.enabled = False
+            self.aPlane2Textbox.enabled = False
+            self.sPlane2Textbox.enabled = False
             self.sendPlane2Button.enabled = True
           else:
-            self.sendPlane2Button.enabled = False
+            self.scenePlane2Button_red.enabled = False
+            self.scenePlane2Button_yellow.enabled = False
+            self.scenePlane2Button_green.enabled = False    
+            self.rPlane2Textbox.enabled = True
+            self.aPlane2Textbox.enabled = True
+            self.sPlane2Textbox.enabled = True
+            rasDefinedPlane2 = (self.rPlane2Textbox.text.strip() and self.aPlane2Textbox.text.strip() and self.sPlane2Textbox.text.strip())
+            if rasDefinedPlane2:
+              self.sendPlane2Button.enabled = True
+            else:
+              self.sendPlane2Button.enabled = False
         else:
+          self.setPlane2Button_ras.enabled = False
+          self.setPlane2Button_view.enabled = False
           self.scenePlane2Button_red.enabled = False
           self.scenePlane2Button_yellow.enabled = False
           self.scenePlane2Button_green.enabled = False    
-          self.rPlane2Textbox.enabled = True
-          self.aPlane2Textbox.enabled = True
-          self.sPlane2Textbox.enabled = True
-          rasDefinedPlane2 = (self.rPlane2Textbox.text.strip() and self.aPlane2Textbox.text.strip() and self.sPlane2Textbox.text.strip())
-          if serverDefined and rasDefinedPlane2:
-            self.sendPlane2Button.enabled = True
-          else:
-            self.sendPlane2Button.enabled = False
+          self.rPlane2Textbox.enabled = False
+          self.aPlane2Textbox.enabled = False
+          self.sPlane2Textbox.enabled = False
+          self.sendPlane2Button.enabled = False
       else:
         self.setPlane2Button_ras.enabled = False
         self.setPlane2Button_view.enabled = False
         self.rPlane2Textbox.enabled = False
         self.aPlane2Textbox.enabled = False
-        self.sPlane2Textbox.enabled = False    
+        self.sPlane2Textbox.enabled = False        
         self.scenePlane2Button_red.enabled = False
         self.scenePlane2Button_yellow.enabled = False
         self.scenePlane2Button_green.enabled = False
@@ -1284,12 +1327,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.minShaftSizeWidget.setEnabled(False)      
     # Check if Tracking is enabled
     if self.inputChannels1.checked:
-      rtNodesDefined = self.firstVolumePlane0Selector.currentNode()
+      rtNodesDefined = True if (self.firstVolumePlane0Selector.currentNode() is not None) else False
     else:
-      rtNodesDefined = self.firstVolumePlane0Selector.currentNode() and self.secondVolumePlane0Selector.currentNode()
+      rtNodesDefined = True if (self.firstVolumePlane0Selector.currentNode() is not None and self.secondVolumePlane0Selector.currentNode() is not None) else False
     self.startTrackingButton.enabled = rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
   
+    
   def updateModelList(self):
     if self.inputChannels1.checked:
       channels = '1'
