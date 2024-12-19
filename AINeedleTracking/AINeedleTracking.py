@@ -13,7 +13,7 @@ import numpy as np
 from math import sqrt, pow
 
 import torch
-from monaiUtils.sitkIO import LoadSitkImaged, PushSitkImaged
+from monaiUtils.sitkMonaiIO import LoadSitkImaged, PushSitkImaged
 from monai.transforms import Compose, ConcatItemsd, EnsureChannelFirstd, ScaleIntensityd, Orientationd, Spacingd
 from monai.transforms import Invertd, Activationsd, AsDiscreted, KeepLargestConnectedComponentd, RemoveSmallObjectsd
 from monai.networks.nets import UNet 
@@ -1688,6 +1688,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     displayNode = self.targetZNode.GetDisplayNode()
     if displayNode:
       displayNode.SetVisibility(False)
+
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('InputMode'):
@@ -1839,6 +1840,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     nonzero_coords = np.argwhere(sitk.GetArrayFromImage(sitk_line) == 1)
     # Calculate the distance of each non-zero pixel to all others
     distances = np.linalg.norm(nonzero_coords[:, None, :] - nonzero_coords[None, :, :], axis=-1)
+    print(distances.shape)
     # Find the two points with the maximum distance; these are the extremity points
     extremity_indices = np.unravel_index(np.argmax(distances), distances.shape)
     extremitys_numpy = [nonzero_coords[index] for index in extremity_indices]
@@ -1938,7 +1940,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     self.model = model_unet.to(device)
-    self.model.load_state_dict(torch.load(model, map_location=device))
+    self.model.load_state_dict(torch.load(model, weights_only=True, map_location=device))
     ## Setup transforms
     if inputVolume == '2':
       pixel_dim = (6, 1.171875, 1.171875)
@@ -2196,7 +2198,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # 3-channels input
     if in_channels == 3:
-      (sitk_img_a, sitk_img_dummy) = self.realImagToMagPhase(firstVolume, secondVolume)
+      (sitk_img_a, _) = self.realImagToMagPhase(firstVolume, secondVolume)
       sitk_img_a = sitk.Cast(sitk_img_a, sitk.sitkFloat32) #Cast it to 32Float
     plane = self.getDirectionName(sitk_img_m)
 
@@ -2287,7 +2289,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Separate labels
     sitk_tip = (sitk_output==2)
     sitk_shaft = (sitk_output==1)
-        
+
+    if debugFlag:
+      self.saveSitkImage(sitk_tip, name='debug_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+      self.saveSitkImage(sitk_shaft, name='debug_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+
     # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
     # if debugFlag:
@@ -2340,7 +2346,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         shaft_size2 = shaft_dict[1]['size']
         if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
-        
+      if debugFlag:
+        self.saveSitkImage(sitk_selected_shaft, name='debug_selected_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+        self.pushSitkToSlicerVolume(sitk_selected_shaft, 'debug_selected_shaft')
+    
     # Select largest tip
     if tip_dict is not None: 
       tip_label = tip_dict[0]['label']
@@ -2353,7 +2362,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if tip_size2 >= minTip:
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
-        
+      if debugFlag:
+        self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+        self.pushSitkToSlicerVolume(sitk_selected_tip, 'debug_selected_tip')
+
+
     # Check tip and shaft connection
     connected = False
     if (shaft_label is not None) and (tip_label is not None):
@@ -2438,6 +2451,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         confidence = 'Medium'  # MEDIUM LOW (big tip NOT connected)
       elif shaft_size >= minShaft:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
+        if debugFlag:
+          self.saveSitkImage(sitk_skeleton, name='debug_skeleton_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
         tip_center = shaft_tip          
         confidence = 'Medium Low'   # MEDIUM LOW (small tip, big shaft) - Use shaft tip
