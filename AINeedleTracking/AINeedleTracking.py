@@ -96,7 +96,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     ####################################
 
     # Set validator for floating points
-    regex = qt.QRegularExpression("^[0-9]*\.?[0-9]*$") # Regular expression for numbers and dots (e.g., 123.45)
+    regex = qt.QRegularExpression(r"^-?[0-9]*\.?[0-9]*$")# Regular expression for numbers and dots (e.g., 123.45)
     self.floatValidator = qt.QRegularExpressionValidator(regex)
 
     ## Model                
