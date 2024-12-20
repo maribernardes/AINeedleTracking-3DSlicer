@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import copy
 
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -684,7 +685,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.windowSizeWidget.singleStep = 4
     self.windowSizeWidget.minimum = 32
     self.windowSizeWidget.maximum = 84
-    self.windowSizeWidget.value = 64
+    self.windowSizeWidget.value = 84
     self.windowSizeWidget.setToolTip("Set window size (px) for the sliding window")
     advancedFormLayout.addRow("Sliding window size ", self.windowSizeWidget)
 
@@ -848,6 +849,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.processingTime = None
     self.inferenceTime = None
 
+    
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
   
@@ -1454,14 +1456,26 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.pushTipToRobot == True:
       self.logic.initializeZFrame(self.zFrameTransform)
 
-    # Check for needle in the current images
-    self.getNeedle() 
-
     # Create listener to image sequence node (considering phase image comes after magnitude)
-    if self.inputChannels==1:
-      self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImage)
+    if self.useScanPlane0 is True:
+      self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0) 
+      if self.inputChannels==1:
+        self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+      else:
+        self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+    elif self.useScanPlane1 is True:
+      self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1) 
+      if self.inputChannels==1:
+        self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
+      else:
+        self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
     else:
-      self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImage)
+      self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2) 
+      if self.inputChannels==1:
+        self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+      else:
+        self.addObserver(self.secondVolumePlane2, self.secondVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+
   
   def stopTracking(self):
     self.isTrackingOn = False
@@ -1478,10 +1492,21 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('Mean Inference Time: %.2f+-%.2f' %(mean_value, std_deviation))
     #TODO: Define what should to be refreshed
     print('UI: stopTracking()')
-    if self.inputChannels==1:
-      self.removeObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImage)
+    if self.useScanPlane0 is True:
+      if self.inputChannels==1:
+        self.removeObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+      else:
+        self.removeObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+    elif self.useScanPlane1 is True:
+      if self.inputChannels==1:
+        self.removeObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
+      else:
+        self.removeObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
     else:
-      self.removeObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImage)
+      if self.inputChannels==1:
+        self.removeObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+      else:
+        self.removeObserver(self.secondVolumePlane2, self.secondVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
   
   # Send PLAN_0 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane0(self):
@@ -1552,22 +1577,30 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Push target
     self.logic.pushTargetToIGTLink(self.robotIGTLClientNode, self.target)
 
-  def receivedImage(self, caller=None, event=None):
-    self.getNeedle()
+  #TODO: Make a generic version that checks which plane is responsible for the callback
+  def receivedImagePlane0(self, caller=None, event=None):
+    print(caller.GetName())
+    if self.useScanPlane0:
+      self.getNeedle('COR',self.firstVolumePlane0, self.secondVolumePlane0)
 
-  def getNeedle(self):
+  def receivedImagePlane1(self, caller=None, event=None):
+    print(caller.GetName())
+    if self.useScanPlane1:
+      self.getNeedle('SAG',self.firstVolumePlane1, self.secondVolumePlane1)
+    
+  def receivedImagePlane2(self, caller=None, event=None):
+    print(caller.GetName())
+    if self.useScanPlane2:
+      self.getNeedle('AX',self.firstVolumePlane2, self.secondVolumePlane2)
+
+  def getNeedle(self, plane, firstVolume, secondVolume):
+    print('PLANE = %s' %plane)
     # Execute one tracking cycle
     if self.isTrackingOn:
       start_time = time.time()
       logFlag = self.logFlagCheckBox.checked
       # Get needle tip
-      if self.useScanPlane0:
-        (confidence, inference_time) = self.logic.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
-      elif self.useScanPlane1:
-        (confidence, inference_time) = self.logic.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName)       
-      else:
-        (confidence, inference_time) = self.logic.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
-
+      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       elapsed_time = time.time() - start_time
       self.processingTime.append(elapsed_time)
       self.inferenceTime.append(inference_time)
@@ -1576,13 +1609,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       else:
         print('Tracked with %s confidence' %confidence)    
         if self.updateScanPlane is True:   
-          if (self.useScanPlane0 is True):
+          if plane=='COR':
             self.logic.updateScanPlane(plane='COR', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
             self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='COR')
-          if (self.useScanPlane1 is True): 
+          if plane=='SAG': 
             self.logic.updateScanPlane(plane='SAG', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
             self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='SAG')      
-          if (self.useScanPlane2 is True):
+          if plane=='AX':
             self.logic.updateScanPlane(plane='AX', checkConfidence=True, sliceOnly=not self.centerScanAtTip, logFlag=logFlag)
             self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='AX')
         if self.pushTipToRobot is True:
@@ -1731,7 +1764,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('DebugName'): 
       parameterNode.SetParameter('DebugName', '')
     if not parameterNode.GetParameter('WindowSize'):
-      parameterNode.SetParameter('WindowSize', '64') 
+      parameterNode.SetParameter('WindowSize', '84') 
     if not parameterNode.GetParameter('MinTipSize'):
       parameterNode.SetParameter('MinTipSize', '10')     
     if not parameterNode.GetParameter('MinShaftSize'):
@@ -1969,12 +2002,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       ]
     pre_array.append(ScaleIntensityd(keys=['image'], minv=0, maxv=1, channel_wise=True))
     # Separate COR / SAG / AX
-    pre_array_cor = pre_array[:]
-    pre_array_sag = pre_array[:]
-    pre_array_ax = pre_array[:]
-    pre_array_cor.append(Orientationd(keys=['image'], axcodes='PIL'))
-    pre_array_sag.append(Orientationd(keys=['image'], axcodes='LIP'))
-    pre_array_ax.append(Orientationd(keys=['image'], axcodes='PIL')) # TODO: Define correct orientation for axial
+    pre_array_cor = copy.deepcopy(pre_array)
+    pre_array_sag = copy.deepcopy(pre_array)
+    pre_array_ax = copy.deepcopy(pre_array)
+    pre_array_cor.append(Orientationd(keys=['image'], axcodes='PIL')) #PIL
+    pre_array_sag.append(Orientationd(keys=['image'], axcodes='RIP')) #LIP
+    pre_array_ax.append(Orientationd(keys=['image'], axcodes='PSL')) # TODO: Define correct orientation for axial
     
     pre_array_cor.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
     pre_array_sag.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
@@ -2165,10 +2198,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, plane, firstVolume, secondVolume, inputMode, inputVolume, windowSize=64, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
+  def getNeedle(self, plane, firstVolume, secondVolume, inputMode, inputVolume, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
     self.count += 1    
     print('Image #%i' %self.count)
+
     ######################################
     ##                                  ##
     ## Step 0: Set input images         ##
@@ -2200,7 +2234,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if in_channels == 3:
       (sitk_img_a, _) = self.realImagToMagPhase(firstVolume, secondVolume)
       sitk_img_a = sitk.Cast(sitk_img_a, sitk.sitkFloat32) #Cast it to 32Float
-    plane = self.getDirectionName(sitk_img_m)
+    # plane = self.getDirectionName(sitk_img_m)
+    #TODO: Check getDirectionName function
 
     # Push debug images to Slicer     
     if debugFlag:
