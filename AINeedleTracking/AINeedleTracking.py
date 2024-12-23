@@ -1,3 +1,7 @@
+# TODO: Only enable tracking when model is selected
+# TODO: Allow tracking without openIGTLink connection
+
+
 import logging
 import os
 import time
@@ -159,10 +163,49 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.updateModelList()
     setupFormLayout.addRow('AI Model:',self.modelFileSelector)
 
+    #### MRI Inputs ####
+    sectionScannerInput = SeparatorWidget('MRI Inputs')
+    setupFormLayout.addRow(sectionScannerInput)
+
+    scannerInputHBoxLayout = qt.QHBoxLayout()
+    
+    # Select MRI Bridge OpenIGTLink connection
+    bridgeConnectionLabel = qt.QLabel('IGTLServer MRI:')
+    self.bridgeConnectionSelector = slicer.qMRMLNodeComboBox()
+    self.bridgeConnectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
+    self.bridgeConnectionSelector.selectNodeUponCreation = True
+    self.bridgeConnectionSelector.addEnabled = False
+    self.bridgeConnectionSelector.removeEnabled = False
+    self.bridgeConnectionSelector.noneEnabled = True
+    self.bridgeConnectionSelector.showHidden = False
+    self.bridgeConnectionSelector.showChildNodeTypes = False
+    self.bridgeConnectionSelector.setMRMLScene(slicer.mrmlScene)
+    self.bridgeConnectionSelector.setToolTip('Select MRI Bridge OpenIGTLink connection')
+    self.bridgeConnectionSelector.enabled = False
+    scannerInputHBoxLayout.addWidget(bridgeConnectionLabel)  
+    scannerInputHBoxLayout.addWidget(self.bridgeConnectionSelector)  
+    scannerInputHBoxLayout.addItem(hSpacer)
+
+    # Scanner Mode check box
+    scannerModeLabel = qt.QLabel('Mode:')
+    self.scannerModeMagPhase = qt.QRadioButton('Mag/Phase')
+    self.scannerModeRealImag = qt.QRadioButton('Real/Imag')
+    self.scannerModeMagPhase.checked = 1
+    self.scannerModeButtonGroup = qt.QButtonGroup()
+    self.scannerModeButtonGroup.addButton(self.scannerModeMagPhase)
+    self.scannerModeButtonGroup.addButton(self.scannerModeRealImag)    
+  
+
+    
+    scannerInputHBoxLayout.addWidget(scannerModeLabel)
+    scannerInputHBoxLayout.addWidget(self.scannerModeMagPhase)
+    scannerInputHBoxLayout.addWidget(self.scannerModeRealImag)
+
+    setupFormLayout.addRow(scannerInputHBoxLayout)
+
     #### MRI Scan Planes ####
     sectionScanPlane = SeparatorWidget('MRI Scan Planes')
     setupFormLayout.addRow(sectionScanPlane)
-
 
     # Create the main grid layout
     scanPlanesGridLayout = qt.QGridLayout()
@@ -172,6 +215,25 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     selectPlanesTitle.setAlignment(qt.Qt.AlignCenter)  # Center-align the title
     # selectPlanesTitle.setStyleSheet('text-decoration: underline;')
     scanPlanesGridLayout.addWidget(selectPlanesTitle, 0, 0, 1, 2)  # Span 2 columns for centering
+
+
+    # UpdateScanPlan check box
+    autoUpdateLabel = qt.QLabel('Auto update')
+    self.updateScanPlaneCheckBox = qt.QCheckBox()
+    self.updateScanPlaneCheckBox.checked = False
+    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane automatically with current tip position')
+
+    # CenterAtTip check box
+    centerAtTipLabel = qt.QLabel('Center at tip')
+    self.centerAtTipCheckBox = qt.QCheckBox()
+    self.centerAtTipCheckBox.checked = False
+    self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
+
+    scanPlanesGridLayout.addWidget(autoUpdateLabel, 0, 9, 1, 3, qt.Qt.AlignRight)  
+    scanPlanesGridLayout.addWidget(self.updateScanPlaneCheckBox, 0, 12, 1, 3, qt.Qt.AlignLeft)  
+    scanPlanesGridLayout.addWidget(centerAtTipLabel, 0, 14)  
+    scanPlanesGridLayout.addWidget(self.centerAtTipCheckBox, 0, 15)  
+
 
     plane0Label = qt.QLabel('PLANE_0 (COR):')
     plane0Label.setFixedWidth(105)
@@ -208,40 +270,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # setPlanesTitle.setStyleSheet('text-decoration: underline;')
     scanPlanesGridLayout.addWidget(setPlanesTitle, 0, 5, 1, 6)  # Span 2 columns for centering
 
-    # Select MRI Bridge OpenIGTLink connection
-    bridgeConnectionLabel = qt.QLabel('IGTLServer MRI:')
-    self.bridgeConnectionSelector = slicer.qMRMLNodeComboBox()
-    self.bridgeConnectionSelector.nodeTypes = ['vtkMRMLIGTLConnectorNode']
-    self.bridgeConnectionSelector.selectNodeUponCreation = True
-    self.bridgeConnectionSelector.addEnabled = False
-    self.bridgeConnectionSelector.removeEnabled = False
-    self.bridgeConnectionSelector.noneEnabled = True
-    self.bridgeConnectionSelector.showHidden = False
-    self.bridgeConnectionSelector.showChildNodeTypes = False
-    self.bridgeConnectionSelector.setMRMLScene(slicer.mrmlScene)
-    self.bridgeConnectionSelector.setToolTip('Select MRI Bridge OpenIGTLink connection')
-    self.bridgeConnectionSelector.enabled = False
-    scanPlanesGridLayout.addWidget(bridgeConnectionLabel, 1, 3, 1, 1, qt.Qt.AlignLeft)  
-    scanPlanesGridLayout.addWidget(self.bridgeConnectionSelector, 1, 4, 1, 6)  
-    
-    # UpdateScanPlan check box
-    autoUpdateHBoxLayout = qt.QHBoxLayout()
-    autoUpdateLabel = qt.QLabel('Online update')
-    autoUpdateLabel.setFixedWidth(105)
-    self.updateScanPlaneCheckBox = qt.QCheckBox()
-    self.updateScanPlaneCheckBox.checked = False
-    self.updateScanPlaneCheckBox.setToolTip('If checked, updates scan plane automatically with current tip position')
-
-    # CenterAtTip check box
-    centerAtTipLabel = qt.QLabel('Center at tip')
-    self.centerAtTipCheckBox = qt.QCheckBox()
-    self.centerAtTipCheckBox.checked = False
-    self.centerAtTipCheckBox.setToolTip('If checked, centers scan plane at current tip position')    
-    
-    scanPlanesGridLayout.addWidget(autoUpdateLabel, 1, 10, 1, 3, qt.Qt.AlignRight)  
-    scanPlanesGridLayout.addWidget(self.updateScanPlaneCheckBox, 1, 10, 1, 3, qt.Qt.AlignRight)  
-    scanPlanesGridLayout.addWidget(centerAtTipLabel, 1, 14)  
-    scanPlanesGridLayout.addWidget(self.centerAtTipCheckBox, 1, 15)  
 
     # Plane 0 Configuration
     setPlane0Label = qt.QLabel('Set PLANE_0:')
@@ -731,6 +759,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.modelFileSelector.connect('currentIndexChanged(str)', self.updateParameterNodeFromGUI)
 
+    self.scannerModeMagPhase.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.scannerModeRealImag.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.usePlane0CheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.usePlane1CheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.usePlane2CheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
@@ -764,6 +794,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
 
     # Connect UI buttons to event calls
+    self.inputModeMagPhase.connect("toggled(bool)", self.updateModelList)
+    self.inputModeRealImag.connect("toggled(bool)", self.updateModelList)
     self.inputVolume2D.connect("toggled(bool)", self.updateModelList)
     self.inputVolume3D.connect("toggled(bool)", self.updateModelList)
     self.inputChannels1.connect("toggled(bool)", self.updateModelList)    
@@ -820,6 +852,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputVolume = None
     self.inputChannels = None
 
+    self.scannerMode = None
     self.useScanPlane0 = None
     self.useScanPlane1 = None
     self.useScanPlane2 = None
@@ -924,6 +957,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3CH')
     self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
 
+    self.scannerModeMagPhase.checked = (self._parameterNode.GetParameter('ScannerMode') == 'MagPhase')
+    self.scannerModeRealImag.checked = (self._parameterNode.GetParameter('ScannerMode') == 'RealImag')
     self.usePlane0CheckBox.checked = (self._parameterNode.GetParameter('UseScanPlane0') == 'True')
     self.usePlane1CheckBox.checked = (self._parameterNode.GetParameter('UseScanPlane1') == 'True')
     self.usePlane2CheckBox.checked = (self._parameterNode.GetParameter('UseScanPlane2') == 'True')
@@ -976,6 +1011,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('InputChannels', '1CH' if self.inputChannels1.checked else '2CH' if self.inputChannels2.checked else '3CH')
     self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex))
 
+    self._parameterNode.SetParameter('ScannerMode', 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('UseScanPlane0', 'True' if self.usePlane0CheckBox.checked else 'False')
     self._parameterNode.SetParameter('UseScanPlane1', 'True' if self.usePlane1CheckBox.checked else 'False')
     self._parameterNode.SetParameter('UseScanPlane2', 'True' if self.usePlane2CheckBox.checked else 'False')
@@ -1056,6 +1092,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputChannels3.enabled = True
       self.modelFileSelector.enabled = True
 
+      self.scannerModeMagPhase.enabled = True
+      self.scannerModeRealImag.enabled = True
       self.usePlane0CheckBox.enabled = True
       self.usePlane1CheckBox.enabled = True
       self.usePlane2CheckBox.enabled = True
@@ -1278,6 +1316,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.inputChannels2.enabled = False
       self.inputChannels3.enabled = False
       self.modelFileSelector.enabled = False
+      self.scannerModeMagPhase.enabled = False
+      self.scannerModeRealImag.enabled = False
       #Optional - MRI Scan Plane
       self.bridgeConnectionSelector.enabled = False
       self.usePlane0CheckBox.enabled = False
@@ -1337,6 +1377,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   
     
   def updateModelList(self):
+    # Clear combo box
+    self.modelFileSelector.clear()
+    # Set folder
+    if self.inputModeRealImag.checked:
+      inputMode = 'RealImag'
+    else:
+      inputMode = 'MagPhase'
     if self.inputChannels1.checked:
       channels = '1'
     elif self.inputChannels2.checked:
@@ -1347,11 +1394,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       volume = '2'
     else:
       volume = '3'
-    listPath = os.path.join(self.modelPath,volume+'D-'+channels+'CH')
-    modelList = []
-    modelList = [f for f in os.listdir(listPath) if os.path.isfile(os.path.join(listPath, f))]
+    listPath = os.path.join(self.modelPath, inputMode, volume+'D-'+channels+'CH')
+    # Check if the folder exists
+    if os.path.exists(listPath) and os.path.isdir(listPath):
+        # Get the list of files
+        modelList = [f for f in os.listdir(listPath) if os.path.isfile(os.path.join(listPath, f))]
+        modelList.sort()
+    else:
+        # If the folder doesn't exist or is not a directory, use an empty list
+        modelList = []
     modelList.sort()
-    self.modelFileSelector.clear()
     self.modelFileSelector.addItems(modelList)
     
   # Get selected scene view for initializing scan plane (PLANE_0)
@@ -1407,6 +1459,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
     self.model = self.modelFileSelector.currentText
 
+    self.scannerMode = 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag'
     self.useScanPlane0 = self.usePlane0CheckBox.checked 
     self.useScanPlane1 = self.usePlane1CheckBox.checked 
     self.useScanPlane2 = self.usePlane2CheckBox.checked 
@@ -1445,9 +1498,15 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       else:
         print(f"Folder '{folder_path}' already exists.")
 
+    # Define image conversion
+    if self.inputMode != self.scannerMode:
+      self.imageConvertion = self.inputMode
+    else:
+      self.imageConvertion = 'None'
+
     # Initialize tracking logic
     self.logic.initializeTracking()
-    self.logic.initializeModel(self.inputVolume, self.inputChannels, self.model)
+    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.model)
     self.logic.initializeMasks(self.segmentationNodePlane0, self.firstVolumePlane0, 
                                self.segmentationNodePlane1, self.firstVolumePlane1, 
                                self.segmentationNodePlane2, self.firstVolumePlane2)
@@ -1600,7 +1659,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       start_time = time.time()
       logFlag = self.logFlagCheckBox.checked
       # Get needle tip
-      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, self.inputMode, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
+      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, self.imageConvertion, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       elapsed_time = time.time() - start_time
       self.processingTime.append(elapsed_time)
       self.inferenceTime.append(inference_time)
@@ -1733,6 +1792,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('Model'): 
       parameterNode.SetParameter('Model', '0')
 
+    if not parameterNode.GetParameter('ScannerMode'):
+      parameterNode.SetParameter('ScannerMode', 'Mag/Phase')  
     if not parameterNode.GetParameter('UseScanPlane0'): 
       parameterNode.SetParameter('UseScanPlane0', 'False')  
     if not parameterNode.GetParameter('UseScanPlane1'): 
@@ -1932,8 +1993,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     image.CopyInformation(sitkReference)
     return image
   
+  # Pull the real/imaginary volumes from the MRML scene and convert them to magnitude/phase volumes
   def realImagToMagPhase(self, realVolume, imagVolume):
-    # Pull the real/imaginary volumes from the MRML scene and convert them to magnitude/phase volumes
     sitk_real = sitkUtils.PullVolumeFromSlicer(realVolume)
     sitk_imag = sitkUtils.PullVolumeFromSlicer(imagVolume)
     numpy_real = sitk.GetArrayFromImage(sitk_real)
@@ -1945,6 +2006,28 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_phase = self.numpyToitk(numpy_phase, sitk_real)
     return (sitk_magn, sitk_phase)
 
+  # Pull the magnitude/phase volumes from the MRML scene and convert them to real/imaginary volumes
+  def magPhaseToRealImag(self, magVolume, phaseVolume):
+    sitk_mag = sitkUtils.PullVolumeFromSlicer(magVolume)
+    sitk_phase = sitkUtils.PullVolumeFromSlicer(phaseVolume)
+    numpy_mag = sitk.GetArrayFromImage(sitk_mag)
+    numpy_phase = sitk.GetArrayFromImage(sitk_phase)
+    # Scaling
+    p_max = np.max(numpy_phase)
+    p_min = np.min(numpy_phase)
+    if p_min<0:
+      if p_max>0:
+        numpy_phase = numpy_phase / p_max*np.pi
+    elif p_min >=0:
+      if p_max>0:
+        numpy_phase = numpy_phase / p_max*2.*np.pi
+    numpy_comp = numpy_mag * np.cos(numpy_phase) + 1j* numpy_mag * np.sin(numpy_phase)
+    numpy_real = numpy_comp.real
+    numpy_imag = numpy_comp.imag
+    sitk_real = self.numpyToitk(numpy_real, sitk_mag)
+    sitk_imag = self.numpyToitk(numpy_imag, sitk_mag)
+    return (sitk_real, sitk_imag)
+  
   # Build a sitk mask volume from a segmentation node
   def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
     if segmentationNode is not None and referenceVolumeNode is not None:
@@ -2034,8 +2117,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tipTrackedNode.SetMatrixTransformToParent(identityMatrix)    
 
   # Initialize AI model
-  def initializeModel(self, inputVolume, in_channels, modelName):
-    modelFilePath = os.path.join(self.path, 'Models', str(inputVolume)+'D-'+str(in_channels)+'CH', modelName)
+  def initializeModel(self, inputMode, inputVolume, in_channels, modelName):
+    modelFilePath = os.path.join(self.path, 'Models', inputMode, str(inputVolume)+'D-'+str(in_channels)+'CH', modelName)
     self.setupUNet(inputVolume, in_channels, modelFilePath) # Setup UNet
 
   # Initialize masks
@@ -2198,7 +2281,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, plane, firstVolume, secondVolume, inputMode, inputVolume, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
+  def getNeedle(self, plane, firstVolume, secondVolume, imageConversion, inputVolume, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
     self.count += 1    
     print('Image #%i' %self.count)
@@ -2220,9 +2303,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_mask = None
 
     # Get sitk images from MRML volume nodes 
-    if (inputMode == 'RealImag'): # Convert to magnitude/phase
+    if (imageConversion == 'RealImag'): # Convert to magnitude/phase
+      (sitk_img_m, sitk_img_p) = self.magPhaseToRealImag(firstVolume, secondVolume)
+    elif (imageConversion == 'MagPhase'):
       (sitk_img_m, sitk_img_p) = self.realImagToMagPhase(firstVolume, secondVolume)
-    else:                         # Already as magnitude/phase
+    else:                         # Conversion is None
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       if (in_channels!=1):
         sitk_img_p = sitkUtils.PullVolumeFromSlicer(secondVolume)
