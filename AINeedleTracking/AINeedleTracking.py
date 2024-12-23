@@ -2090,7 +2090,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     pre_array_ax = copy.deepcopy(pre_array)
     pre_array_cor.append(Orientationd(keys=['image'], axcodes='PIL')) #PIL
     pre_array_sag.append(Orientationd(keys=['image'], axcodes='RIP')) #LIP
-    pre_array_ax.append(Orientationd(keys=['image'], axcodes='PSL')) # TODO: Define correct orientation for axial
+    pre_array_ax.append(Orientationd(keys=['image'], axcodes='SPL'))  #AX
     
     pre_array_cor.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
     pre_array_sag.append(Spacingd(keys=['image'], pixdim=pixel_dim, mode=('bilinear')))
