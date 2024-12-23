@@ -1077,8 +1077,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     transformDefined = True   # Not required
     targetDefined = True      # Not required 
     debugNameDefined = True   # Not required 
-  
     scanPlaneDefined = True if (self.usePlane0CheckBox.checked or self.usePlane1CheckBox.checked or self.usePlane2CheckBox.checked) else False
+    modelDefined = False if (self.modelFileSelector.currentText == '') else True
+    
 
     # Not tracking = ENABLE SELECTION
     if not self.isTrackingOn:
@@ -1372,7 +1373,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       rtNodesDefined = True if (self.firstVolumePlane0Selector.currentNode() is not None) else False
     else:
       rtNodesDefined = True if (self.firstVolumePlane0Selector.currentNode() is not None and self.secondVolumePlane0Selector.currentNode() is not None) else False
-    self.startTrackingButton.enabled = rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
+    self.startTrackingButton.enabled = modelDefined and rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
   
     
