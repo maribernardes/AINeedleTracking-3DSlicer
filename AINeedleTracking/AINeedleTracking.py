@@ -26,6 +26,8 @@ from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
 from monai.data import decollate_batch
 from monai.handlers.utils import from_engine
+# from pyunwrap import unwrap2D, unwrap3D
+from skimage.restoration import unwrap_phase
 
 
 class AINeedleTracking(ScriptedLoadableModule):
@@ -102,6 +104,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Set validator for floating points
     regex = qt.QRegularExpression(r"^-?[0-9]*\.?[0-9]*$")# Regular expression for numbers and dots (e.g., 123.45)
     self.floatValidator = qt.QRegularExpressionValidator(regex)
+    self.path = os.path.dirname(os.path.abspath(__file__))
 
     ## Model                
     ####################################
@@ -159,7 +162,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     setupFormLayout.addRow(inputHBoxLayout1)
     
     self.modelFileSelector = qt.QComboBox()
-    self.modelPath= os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Models')
     self.updateModelList()
     setupFormLayout.addRow('AI Model:',self.modelFileSelector)
 
@@ -195,8 +197,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.scannerModeButtonGroup.addButton(self.scannerModeMagPhase)
     self.scannerModeButtonGroup.addButton(self.scannerModeRealImag)    
   
-
-    
     scannerInputHBoxLayout.addWidget(scannerModeLabel)
     scannerInputHBoxLayout.addWidget(self.scannerModeMagPhase)
     scannerInputHBoxLayout.addWidget(self.scannerModeRealImag)
@@ -491,7 +491,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.segmentationMaskPlane0Selector.setToolTip('Select segmentation for masking input images')
     trackingFormLayout.addRow('Mask (optional): ', self.segmentationMaskPlane0Selector)
 
-
     sectionPlane1 = SeparatorWidget('PLANE_1 (SAG)')
     trackingFormLayout.addRow(sectionPlane1)
 
@@ -680,7 +679,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Log mode check box (print log messages)
     logHBoxLayout = qt.QHBoxLayout()  
     logLabel = qt.QLabel('Screen log')
-    logLabel.setFixedWidth(80)
+    logLabel.setFixedWidth(85)
     self.logFlagCheckBox = qt.QCheckBox()
     self.logFlagCheckBox.checked = False
     self.logFlagCheckBox.setToolTip('If checked, prints log messages at intermediate steps')
@@ -692,7 +691,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Debug mode check box (output images at intermediate steps)
     saveHBoxLayout = qt.QHBoxLayout()   
     debugLabel = qt.QLabel('Save images')
-    debugLabel.setFixedWidth(80)
+    debugLabel.setFixedWidth(85)
     self.debugFlagCheckBox = qt.QCheckBox()
     self.debugFlagCheckBox.checked = False
     self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
@@ -708,6 +707,18 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     saveHBoxLayout.addStretch()  
     advancedFormLayout.addRow(saveHBoxLayout)    
 
+    # Preprocessing options for the images
+    preprocessingHBoxLayout = qt.QHBoxLayout()   
+    phaseUnwrapLabel = qt.QLabel('Phase unwrap')
+    phaseUnwrapLabel.setFixedWidth(85)
+    self.phaseUnwrapCheckBox = qt.QCheckBox()
+    self.phaseUnwrapCheckBox.checked = False
+    self.phaseUnwrapCheckBox.setToolTip('If checked, phase images will be unwraped before needle segmentation')
+    preprocessingHBoxLayout.addWidget(phaseUnwrapLabel)
+    preprocessingHBoxLayout.addWidget(self.phaseUnwrapCheckBox)
+    preprocessingHBoxLayout.addStretch()  
+    advancedFormLayout.addRow(preprocessingHBoxLayout)
+    
     # Window size for sliding window
     self.windowSizeWidget = ctk.ctkSliderWidget()
     self.windowSizeWidget.singleStep = 4
@@ -788,6 +799,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.logFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.debugNameTextbox.connect("textChanged", self.updateParameterNodeFromGUI)
+    self.phaseUnwrapCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.windowSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minTipSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minShaftSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
@@ -990,6 +1002,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.logFlagCheckBox.checked = (self._parameterNode.GetParameter('ScreenLog') == 'True')
     self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
     self.debugNameTextbox.setText(self._parameterNode.GetParameter('DebugName'))
+    self.phaseUnwrapCheckBox.checked = (self._parameterNode.GetParameter('PhaseUnwrap') == 'True')
     self.windowSizeWidget.value = float(self._parameterNode.GetParameter('WindowSize'))
     self.minTipSizeWidget.value = float(self._parameterNode.GetParameter('MinTipSize'))
     self.minShaftSizeWidget.value = float(self._parameterNode.GetParameter('MinShaftSize'))
@@ -1043,6 +1056,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('ScreenLog', 'True' if self.logFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('DebugName', self.debugNameTextbox.text.strip())    
+    self._parameterNode.SetParameter('PhaseUnwrap', 'True' if self.phaseUnwrapCheckBox.checked else 'False')
     self._parameterNode.SetParameter('WindowSize', str(self.windowSizeWidget.value))
     self._parameterNode.SetParameter('MinTipSize', str(self.minTipSizeWidget.value))
     self._parameterNode.SetParameter('MinShaftSize', str(self.minShaftSizeWidget.value))
@@ -1076,10 +1090,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     clientDefined = True      # Not required
     transformDefined = True   # Not required
     targetDefined = True      # Not required 
-    debugNameDefined = True   # Not required 
     scanPlaneDefined = True if (self.usePlane0CheckBox.checked or self.usePlane1CheckBox.checked or self.usePlane2CheckBox.checked) else False
     modelDefined = False if (self.modelFileSelector.currentText == '') else True
-    
 
     # Not tracking = ENABLE SELECTION
     if not self.isTrackingOn:
@@ -1306,6 +1318,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # debugNameDefined = if self.debugNameTextbox.text.strip() 
       else:
         self.debugNameTextbox.enabled = False
+      # 4) Phase unwrap
+      if self.inputModeMagPhase.checked:
+        self.phaseUnwrapCheckBox.enabled = True
+      else:
+        self.phaseUnwrapCheckBox.enabled = False
     # When tracking = DISABLE SELECTION
     else:
       #Setup
@@ -1384,7 +1401,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.inputModeRealImag.checked:
       inputMode = 'RealImag'
     else:
-      inputMode = 'MagPhase'
+      inputMode = 'MagPhase'    
     if self.inputChannels1.checked:
       channels = '1'
     elif self.inputChannels2.checked:
@@ -1395,7 +1412,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       volume = '2'
     else:
       volume = '3'
-    listPath = os.path.join(self.modelPath, inputMode, volume+'D-'+channels+'CH')
+    listPath = os.path.join(self.path, 'Models', inputMode, volume+'D-'+channels+'CH')
     # Check if the folder exists
     if os.path.exists(listPath) and os.path.isdir(listPath):
         # Get the list of files
@@ -1523,13 +1540,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
       else:
         self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
-    elif self.useScanPlane1 is True:
+    if self.useScanPlane1 is True:
       self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
       else:
         self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
-    else:
+    if self.useScanPlane2 is True:
       self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
@@ -1557,16 +1574,17 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.removeObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
       else:
         self.removeObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
-    elif self.useScanPlane1 is True:
+    if self.useScanPlane1 is True:
       if self.inputChannels==1:
         self.removeObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
       else:
         self.removeObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
-    else:
+    if self.useScanPlane2 is True:
       if self.inputChannels==1:
         self.removeObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
       else:
         self.removeObserver(self.secondVolumePlane2, self.secondVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+    print('Finished removing observers')
   
   # Send PLAN_0 though OpenIGTLink MRI Server - Value at selected view slice
   def sendPlane0(self):
@@ -1659,8 +1677,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self.isTrackingOn:
       start_time = time.time()
       logFlag = self.logFlagCheckBox.checked
+      phaseUnwrap = self.phaseUnwrapCheckBox.checked
       # Get needle tip
-      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, self.imageConvertion, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
+      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, phaseUnwrap, self.imageConvertion, self.inputVolume, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       elapsed_time = time.time() - start_time
       self.processingTime.append(elapsed_time)
       self.inferenceTime.append(inference_time)
@@ -1698,6 +1717,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.path = os.path.dirname(os.path.abspath(__file__))
     self.debug_path = os.path.join(self.path,'Debug')
     self.fileWriter = sitk.ImageFileWriter()
+    
+    # Phase rescaling filter
+    self.phaseRescaleFilter = sitk.RescaleIntensityImageFilter()
+    self.phaseRescaleFilter.SetOutputMaximum(2*np.pi)
+    self.phaseRescaleFilter.SetOutputMinimum(0)    
     
     # Input image masking
     self.sitk_mask0 = None
@@ -2029,6 +2053,37 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_imag = self.numpyToitk(numpy_imag, sitk_mag)
     return (sitk_real, sitk_imag)
   
+   # Unwrap phase images with implementation from scikit-image (module: restoration)
+  def unwrap_phase_array(self, array_p, array_mask):
+    array_p_masked = np.ma.array(array_p, mask=np.logical_not(array_mask).astype(int))  # Mask phase image (inverted mask)
+    if array_p.shape[0] == 1: # 2D image in a 3D array: make it 2D array for improved performance
+        array_p_unwraped = np.ma.copy(array_p_masked)  # Initialize unwraped array as the original
+        array_p_unwraped[0,:,:] = unwrap_phase(array_p_masked[0,:,:], wrap_around=(False,False))               
+    else:
+        array_p_unwraped = unwrap_phase(array_p_masked, wrap_around=(False,False,False))   
+    return array_p_unwraped
+
+  # Unwrap the phase sitk image
+  # Using code from https://github.com/maribernardes/SimpleNeedleTracking-3DSlicer/blob/master/SimpleNeedleTracking/SimpleNeedleTracking.py
+  # TODO: Check if masking could be made using sitk.Mask instead of doing it in numpy array
+  def phaseUnwrapItk(self, sitk_phase, sitk_mask):
+    self.pushSitkToSlicerVolume(sitk_phase, 'debug_phase_init')
+    # if sitk_mask is not None:
+    #   sitk_phase = sitk.Mask(sitk_phase, sitk_mask)
+    # Phase scaling to angle interval [0 to 2*pi]
+    sitk_phase = self.phaseRescaleFilter.Execute(sitk_phase)
+    # Unwrapped base phase
+    numpy_base_p = sitk.GetArrayFromImage(sitk_phase)
+    numpy_mask = sitk.GetArrayFromImage(sitk_mask)
+
+    unwrapped_phase = self.unwrap_phase_array(numpy_base_p, numpy_mask)
+    # Put in sitk image
+    sitk_unwrapped_phase = sitk.GetImageFromArray(unwrapped_phase)
+    sitk_unwrapped_phase.CopyInformation(sitk_phase)
+    sitk_unwrapped_phase = self.phaseRescaleFilter.Execute(sitk_unwrapped_phase)
+    self.pushSitkToSlicerVolume(sitk_unwrapped_phase, 'debug_phase_unwrap')
+    return sitk_unwrapped_phase
+  
   # Build a sitk mask volume from a segmentation node
   def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
     if segmentationNode is not None and referenceVolumeNode is not None:
@@ -2282,7 +2337,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.tipTrackedNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedNode)
 
-  def getNeedle(self, plane, firstVolume, secondVolume, imageConversion, inputVolume, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
+  def getNeedle(self, plane, firstVolume, secondVolume, phaseUnwrap, imageConversion, inputVolume, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
     self.count += 1    
     print('Image #%i' %self.count)
@@ -2317,19 +2372,27 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if (in_channels!=1):
       sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # 3-channels input
+    print('in channels = %i' %in_channels)
     if in_channels == 3:
+      print('Yest 3 channels')
       (sitk_img_a, _) = self.realImagToMagPhase(firstVolume, secondVolume)
       sitk_img_a = sitk.Cast(sitk_img_a, sitk.sitkFloat32) #Cast it to 32Float
+    else:
+      print('Not 3 channels')
+    # Phase unwrap
+    if (phaseUnwrap is True) and (imageConversion != 'RealImag'):
+      sitk_img_p = self.phaseUnwrapItk(sitk_img_p, sitk_mask)
+      print('Unwrap')
+
     # plane = self.getDirectionName(sitk_img_m)
     #TODO: Check getDirectionName function
 
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
-      if (in_channels!=1):
-        self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
       self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if (in_channels!=1):
+        self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
         self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if in_channels == 3:
         self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
