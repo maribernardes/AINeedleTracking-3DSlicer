@@ -26,7 +26,6 @@ from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
 from monai.data import decollate_batch
 from monai.handlers.utils import from_engine
-# from pyunwrap import unwrap2D, unwrap3D
 from skimage.restoration import unwrap_phase
 
 
@@ -2056,7 +2055,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Unwrap the phase sitk image
   # Using code from https://github.com/maribernardes/SimpleNeedleTracking-3DSlicer/blob/master/SimpleNeedleTracking/SimpleNeedleTracking.py
   def phaseUnwrapItk(self, sitk_phase):
-    self.pushSitkToSlicerVolume(sitk_phase, 'debug_phase_init')
+    # Rescale phase
     sitk_phase = self.phaseRescaleFilter.Execute(sitk_phase)
     # Unwrapped base phase
     numpy_base_p = sitk.GetArrayFromImage(sitk_phase)
@@ -2068,7 +2067,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Put in sitk image
     sitk_unwrapped_phase = sitk.GetImageFromArray(array_p_unwraped)
     sitk_unwrapped_phase.CopyInformation(sitk_phase)
-    self.pushSitkToSlicerVolume(sitk_unwrapped_phase, 'debug_phase_unwrap')
     return sitk_unwrapped_phase
   
   # Build a sitk mask volume from a segmentation node
