@@ -2052,35 +2052,22 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_real = self.numpyToitk(numpy_real, sitk_mag)
     sitk_imag = self.numpyToitk(numpy_imag, sitk_mag)
     return (sitk_real, sitk_imag)
-  
-   # Unwrap phase images with implementation from scikit-image (module: restoration)
-  def unwrap_phase_array(self, array_p, array_mask):
-    array_p_masked = np.ma.array(array_p, mask=np.logical_not(array_mask).astype(int))  # Mask phase image (inverted mask)
-    if array_p.shape[0] == 1: # 2D image in a 3D array: make it 2D array for improved performance
-        array_p_unwraped = np.ma.copy(array_p_masked)  # Initialize unwraped array as the original
-        array_p_unwraped[0,:,:] = unwrap_phase(array_p_masked[0,:,:], wrap_around=(False,False))               
-    else:
-        array_p_unwraped = unwrap_phase(array_p_masked, wrap_around=(False,False,False))   
-    return array_p_unwraped
 
   # Unwrap the phase sitk image
   # Using code from https://github.com/maribernardes/SimpleNeedleTracking-3DSlicer/blob/master/SimpleNeedleTracking/SimpleNeedleTracking.py
-  # TODO: Check if masking could be made using sitk.Mask instead of doing it in numpy array
-  def phaseUnwrapItk(self, sitk_phase, sitk_mask):
+  def phaseUnwrapItk(self, sitk_phase):
     self.pushSitkToSlicerVolume(sitk_phase, 'debug_phase_init')
-    # if sitk_mask is not None:
-    #   sitk_phase = sitk.Mask(sitk_phase, sitk_mask)
-    # Phase scaling to angle interval [0 to 2*pi]
     sitk_phase = self.phaseRescaleFilter.Execute(sitk_phase)
     # Unwrapped base phase
     numpy_base_p = sitk.GetArrayFromImage(sitk_phase)
-    numpy_mask = sitk.GetArrayFromImage(sitk_mask)
-
-    unwrapped_phase = self.unwrap_phase_array(numpy_base_p, numpy_mask)
+    if numpy_base_p.shape[0] == 1: # 2D image in a 3D array: make it 2D array for improved performance
+        array_p_unwraped = np.ma.copy(numpy_base_p)  # Initialize unwraped array as the original
+        array_p_unwraped[0,:,:] = unwrap_phase(numpy_base_p[0,:,:], wrap_around=(False,False))               
+    else:
+        array_p_unwraped = unwrap_phase(numpy_base_p, wrap_around=(False,False,False))   
     # Put in sitk image
-    sitk_unwrapped_phase = sitk.GetImageFromArray(unwrapped_phase)
+    sitk_unwrapped_phase = sitk.GetImageFromArray(array_p_unwraped)
     sitk_unwrapped_phase.CopyInformation(sitk_phase)
-    sitk_unwrapped_phase = self.phaseRescaleFilter.Execute(sitk_unwrapped_phase)
     self.pushSitkToSlicerVolume(sitk_unwrapped_phase, 'debug_phase_unwrap')
     return sitk_unwrapped_phase
   
@@ -2372,20 +2359,30 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if (in_channels!=1):
       sitk_img_p = sitk.Cast(sitk_img_p, sitk.sitkFloat32)
     # 3-channels input
-    print('in channels = %i' %in_channels)
     if in_channels == 3:
-      print('Yest 3 channels')
       (sitk_img_a, _) = self.realImagToMagPhase(firstVolume, secondVolume)
       sitk_img_a = sitk.Cast(sitk_img_a, sitk.sitkFloat32) #Cast it to 32Float
-    else:
-      print('Not 3 channels')
     # Phase unwrap
     if (phaseUnwrap is True) and (imageConversion != 'RealImag'):
-      sitk_img_p = self.phaseUnwrapItk(sitk_img_p, sitk_mask)
-      print('Unwrap')
+      sitk_img_p = self.phaseUnwrapItk(sitk_img_p)
 
     # plane = self.getDirectionName(sitk_img_m)
     #TODO: Check getDirectionName function
+
+    ######################################
+    ##                                  ##
+    ## Step 0b: Mask inputs             ##
+    ##                                  ##
+    ######################################
+
+    # Apply segmentation mask (optional)
+    if sitk_mask is not None:
+      sitk_mask.SetOrigin(sitk_img_m.GetOrigin())  # Update origin (due to A-P change in PLAN_0) #TODO: Test this. Don't remember
+      sitk_img_m = sitk.Mask(sitk_img_m, sitk_mask)
+      if (in_channels!=1):
+        sitk_img_p = sitk.Mask(sitk_img_p, sitk_mask)
+      if in_channels == 3:
+        sitk_img_a = sitk.Mask(sitk_img_a, sitk_mask)
 
     # Push debug images to Slicer     
     if debugFlag:
@@ -2459,10 +2456,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################
 
-    # Apply segmentation mask (optional)
-    if sitk_mask is not None:
-      sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
-      sitk_output = sitk.Mask(sitk_output, sitk_mask)
+    # # Apply segmentation mask (optional)
+    # if sitk_mask is not None:
+    #   sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
+    #   sitk_output = sitk.Mask(sitk_output, sitk_mask)
     
     ######################################
     ##                                  ##
