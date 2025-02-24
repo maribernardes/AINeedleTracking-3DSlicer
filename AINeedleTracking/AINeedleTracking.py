@@ -2111,6 +2111,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Create mask from segmentation
       slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, maskLabelMapNode, referenceVolumeNode)
       sitk_mask = sitkUtils.PullVolumeFromSlicer(maskLabelMapNode)
+      sitk_mask = sitk.Cast(sitk_mask, sitk.sitkUInt8)
       # Remove temporary labelmap node
       slicer.mrmlScene.RemoveNode(maskLabelMapNode)
       return sitk_mask
@@ -2396,7 +2397,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Apply segmentation mask (optional)
     if sitk_mask is not None:
-      sitk_mask.SetOrigin(sitk_img_m.GetOrigin())  # Update origin (due to A-P change in PLAN_0) #TODO: Test this. Don't remember
       sitk_img_m = sitk.Mask(sitk_img_m, sitk_mask)
       if (in_channels!=1):
         sitk_img_p = sitk.Mask(sitk_img_p, sitk_mask)
@@ -2414,7 +2414,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
         self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
       if sitk_mask is not None:
-        sitk_mask = sitk.Cast(sitk_mask, sitk.sitkUInt8)
         self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask')
         self.saveSitkImage(sitk_mask, name='debug_mask_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
 
@@ -2469,17 +2468,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if debugFlag:
       self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
-    ######################################
-    ##                                  ##
-    ## Step 2: Get segmentations        ##
-    ##                                  ##
-    ######################################
-
-    # # Apply segmentation mask (optional)
-    # if sitk_mask is not None:
-    #   sitk_mask.SetOrigin(sitk_output.GetOrigin())                  # Update origin (due to A-P change in PLAN_0)
-    #   sitk_output = sitk.Mask(sitk_output, sitk_mask)
-    
     ######################################
     ##                                  ##
     ## Step 3: Separate tip elements    ##
@@ -2565,7 +2553,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       if debugFlag:
         self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         self.pushSitkToSlicerVolume(sitk_selected_tip, 'debug_selected_tip')
-
 
     # Check tip and shaft connection
     connected = False
@@ -2670,7 +2657,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     
     ####################################
     ##                                ##
-    ## Step 7: Update  tipSegmNode    ##
+    ## Step 7: Update tipSegmNode     ##
     ##                                ##
     ####################################
 
