@@ -1764,29 +1764,29 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tipDetected = None
 
     # Check if PLANE_0 node exists, if not, create a new one
-    self.scanPlane0TransformNode = slicer.util.getFirstNodeByName('PLANE_0')
-    if self.scanPlane0TransformNode is None or self.scanPlane0TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.scanPlane0TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'PLANE_0')
+    if self.scanPlane0TransformNode is None:
         self.scanPlane0TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane0TransformNode.SetName('PLANE_0')
         slicer.mrmlScene.AddNode(self.scanPlane0TransformNode)
     self.initializeScanPlane(plane='COR')
     # Check if PLANE_1 node exists, if not, create a new one
-    self.scanPlane1TransformNode = slicer.util.getFirstNodeByName('PLANE_1')
-    if self.scanPlane1TransformNode is None or self.scanPlane1TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.scanPlane1TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','PLANE_1')
+    if self.scanPlane1TransformNode is None:
         self.scanPlane1TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane1TransformNode.SetName('PLANE_1')
         slicer.mrmlScene.AddNode(self.scanPlane1TransformNode)
     self.initializeScanPlane(plane='SAG')
     # Check if PLANE_2 node exists, if not, create a new one
-    self.scanPlane2TransformNode = slicer.util.getFirstNodeByName('PLANE_2')
-    if self.scanPlane2TransformNode is None or self.scanPlane2TransformNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.scanPlane2TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','PLANE_2')
+    if self.scanPlane2TransformNode is None:
         self.scanPlane2TransformNode = slicer.vtkMRMLLinearTransformNode()
         self.scanPlane2TransformNode.SetName('PLANE_2')
         slicer.mrmlScene.AddNode(self.scanPlane2TransformNode)
     self.initializeScanPlane(plane='AX')
     # Check if needle labelmap node exists, if not, create a new one
-    self.needleLabelMapNode = slicer.util.getFirstNodeByName('NeedleLabelMap')
-    if self.needleLabelMapNode is None or self.needleLabelMapNode.GetClassName() != 'vtkMRMLLabelMapVolumeNode':
+    self.needleLabelMapNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap')
+    if self.needleLabelMapNode is None:
         self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
         self.needleLabelMapNode.SetName('NeedleLabelMap')
         slicer.mrmlScene.AddNode(self.needleLabelMapNode)
@@ -1794,40 +1794,40 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.needleLabelMapNode.CreateDefaultDisplayNodes()
         self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
     # Check if text node exists, if not, create a new one
-    self.needleConfidenceNode = slicer.util.getFirstNodeByName('CurrentTipConfidence')
-    if self.needleConfidenceNode is None or self.needleConfidenceNode.GetClassName() != 'vtkMRMLTextNode':
+    self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
+    if self.needleConfidenceNode is None:
         self.needleConfidenceNode = slicer.vtkMRMLTextNode()
         self.needleConfidenceNode.SetName('CurrentTipConfidence')
         slicer.mrmlScene.AddNode(self.needleConfidenceNode)
     # Check if segmented tip node exists, if not, create a new one
-    self.tipSegmNode = slicer.util.getFirstNodeByName('SegmentedTipTransform')
-    if self.tipSegmNode is None or self.tipSegmNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.tipSegmNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','SegmentedTipTransform')
+    if self.tipSegmNode is None:
         self.tipSegmNode = slicer.vtkMRMLLinearTransformNode()
         self.tipSegmNode.SetName('SegmentedTipTransform')
         slicer.mrmlScene.AddNode(self.tipSegmNode)
     # Check if tracked tip node exists, if not, create a new one
-    self.tipTrackedNode = slicer.util.getFirstNodeByName('CurrentTrackedTipTransform')
-    if self.tipTrackedNode is None or self.tipTrackedNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.tipTrackedNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','CurrentTrackedTipTransform')
+    if self.tipTrackedNode is None:
         self.tipTrackedNode = slicer.vtkMRMLLinearTransformNode()
         self.tipTrackedNode.SetName('CurrentTrackedTipTransform')
         slicer.mrmlScene.AddNode(self.tipTrackedNode)
     # Check if zFrame tracked tip node exists, if not, create a new one
-    self.tipTrackedZNode = slicer.util.getFirstNodeByName('CurrentTrackedTipZ')
-    if self.tipTrackedZNode is None or self.tipTrackedZNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.tipTrackedZNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','CurrentTrackedTipZ')
+    if self.tipTrackedZNode is None:
         self.tipTrackedZNode = slicer.vtkMRMLLinearTransformNode()
         self.tipTrackedZNode.SetName('CurrentTrackedTipZ')
         self.tipTrackedZNode.SetHideFromEditors(True)
-        slicer.mrmlScene.AddNode(self.tipTrackedZNode)
+        slicer.mrmlScene.AddNode(self.tipTrackedZNode)   
     # Check if WorldToZFrame transform node exists, if not, create a new one
-    self.worldToZFrameNode = slicer.util.getFirstNodeByName('WorldToZFrame')
-    if self.worldToZFrameNode is None or self.worldToZFrameNode.GetClassName() != 'vtkMRMLLinearTransformNode':
+    self.worldToZFrameNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'WorldToZFrame')
+    if self.worldToZFrameNode is None:
         self.worldToZFrameNode = slicer.vtkMRMLLinearTransformNode()
         self.worldToZFrameNode.SetName('WorldToZFrame')
         self.worldToZFrameNode.SetHideFromEditors(True)
         slicer.mrmlScene.AddNode(self.worldToZFrameNode)
     # Check if TargetZ point list node exists, if not, create a new one
-    self.targetZNode = slicer.util.getFirstNodeByName('TargetZ')
-    if self.targetZNode is None or self.targetZNode.GetClassName() != 'vtkMRMLMarkupsFiducialNode':
+    self.targetZNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode','TargetZ')
+    if self.targetZNode is None:
         self.targetZNode = slicer.vtkMRMLMarkupsFiducialNode()
         self.targetZNode.SetName('TargetZ')
         self.targetZNode.SetHideFromEditors(True)
@@ -1835,7 +1835,36 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     displayNode = self.targetZNode.GetDisplayNode()
     if displayNode:
       displayNode.SetVisibility(False)
+    # Check if Tip point list node exists, if not, create a new one
+    self.tipMarkupsNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode', 'NeedleTip' )
+    if self.tipMarkupsNode is None:
+        self.tipMarkupsNode = slicer.vtkMRMLMarkupsFiducialNode()
+        self.tipMarkupsNode.SetName('NeedleTip')
+        slicer.mrmlScene.AddNode(self.tipMarkupsNode)
+    # Ensure there is only one control point
+    if self.tipMarkupsNode.GetNumberOfControlPoints() > 1:
+        self.tipMarkupsNode.RemoveAllControlPoints()
+    # If no control point exists, add one at (0,0,0)
+    if self.tipMarkupsNode.GetNumberOfControlPoints() == 0:
+        self.tipMarkupsNode.AddControlPoint(vtk.vtkVector3d(0, 0, 0), "T")
+    # Ensure the control point has the correct label
+    self.tipMarkupsNode.SetNthControlPointLabel(0, "T")
+    # Ensure control points are locked (cannot be moved or edited in GUI)
+    self.tipMarkupsNode.SetLocked(True)
+    # Prevent new control points from being added via the GUI
+    self.tipMarkupsNode.SetFixedNumberOfControlPoints(True)           
+    # Set glyph size to 1%
+    displayNode = self.tipMarkupsNode.GetDisplayNode()
+    if displayNode:
+        displayNode.SetGlyphScale(1)  # 1% glyph size
+    else:
+        # If the display node does not exist, create it and set the glyph size
+        self.tipMarkupsNode.CreateDefaultDisplayNodes()
+        self.tipMarkupsNode.GetDisplayNode().SetGlyphScale(1)
 
+    # Set the parent transform to self.tipTrackedNode
+    if self.tipTrackedNode:
+        self.tipMarkupsNode.SetAndObserveTransformNodeID(self.tipTrackedNode.GetID())
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('InputMode'):
