@@ -1841,30 +1841,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipMarkupsNode = slicer.vtkMRMLMarkupsFiducialNode()
         self.tipMarkupsNode.SetName('NeedleTip')
         slicer.mrmlScene.AddNode(self.tipMarkupsNode)
-    # Ensure there is only one control point
-    if self.tipMarkupsNode.GetNumberOfControlPoints() > 1:
-        self.tipMarkupsNode.RemoveAllControlPoints()
-    # If no control point exists, add one at (0,0,0)
-    if self.tipMarkupsNode.GetNumberOfControlPoints() == 0:
-        self.tipMarkupsNode.AddControlPoint(vtk.vtkVector3d(0, 0, 0), "T")
-    # Ensure the control point has the correct label
-    self.tipMarkupsNode.SetNthControlPointLabel(0, "T")
-    # Ensure control points are locked (cannot be moved or edited in GUI)
-    self.tipMarkupsNode.SetLocked(True)
-    # Prevent new control points from being added via the GUI
-    self.tipMarkupsNode.SetFixedNumberOfControlPoints(True)           
-    # Set glyph size to 1%
-    displayNode = self.tipMarkupsNode.GetDisplayNode()
-    if displayNode:
-        displayNode.SetGlyphScale(1)  # 1% glyph size
-    else:
-        # If the display node does not exist, create it and set the glyph size
-        self.tipMarkupsNode.CreateDefaultDisplayNodes()
-        self.tipMarkupsNode.GetDisplayNode().SetGlyphScale(1)
+        self.initializeTipMarkup()
 
-    # Set the parent transform to self.tipTrackedNode
-    if self.tipTrackedNode:
-        self.tipMarkupsNode.SetAndObserveTransformNodeID(self.tipTrackedNode.GetID())
   # Initialize parameter node with default settings
   def setDefaultParameters(self, parameterNode):
     if not parameterNode.GetParameter('InputMode'):
@@ -1917,6 +1895,38 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('MinShaftSize'):
       parameterNode.SetParameter('MinShaftSize', '30') 
 
+  def initializeTipMarkup(self):
+    # Ensure there is only one control point
+    if self.tipMarkupsNode.GetNumberOfControlPoints() > 1:
+        self.tipMarkupsNode.RemoveAllControlPoints()
+    # If no control point exists, add one at (0,0,0)
+    if self.tipMarkupsNode.GetNumberOfControlPoints() == 0:
+        self.tipMarkupsNode.AddControlPoint(vtk.vtkVector3d(0, 0, 0), "T")
+    # Ensure tip is labeled, locked and one-point only
+    self.tipMarkupsNode.SetNthControlPointLabel(0, "T")
+    self.tipMarkupsNode.SetLocked(True)
+    self.tipMarkupsNode.SetFixedNumberOfControlPoints(True)           
+    displayNode = self.tipMarkupsNode.GetDisplayNode()
+    if displayNode:
+        displayNode.SetGlyphScale(1)  # 1% glyph size
+    else:
+        # If the display node does not exist, create it and set the glyph size
+        self.tipMarkupsNode.CreateDefaultDisplayNodes()
+        self.tipMarkupsNode.GetDisplayNode().SetGlyphScale(1)
+    self.setTipMarkupColor()
+    # Set the parent transform to self.tipTrackedNode
+    if self.tipTrackedNode:
+        self.tipMarkupsNode.SetAndObserveTransformNodeID(self.tipTrackedNode.GetID())
+
+  # Set TipMarkup Color according to tracking status
+  def setTipMarkupColor(self, tipTracked:bool = None):
+    displayNode = self.tipMarkupsNode.GetDisplayNode()
+    if tipTracked is None:
+      displayNode.SetSelectedColor(1.0, 0.502, 0.502) #PINK (default)
+    elif tipTracked is True:
+      displayNode.SetSelectedColor(0.667, 1.0, 0.498) #GREEN (default)
+    else:
+      displayNode.SetSelectedColor(1.0, 1.0, 0.498) #YELLOW (default)
 
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
@@ -2646,6 +2656,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if logFlag:
           print('Segmented tip = None')
           # Does not update anything
+        self.setTipMarkupColor(tipTracked=False)  
         return (None, inference_time)  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
@@ -2735,10 +2746,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           self.tipDetected = True
           tip_matrix.SetElement(2,3, centerRAS[2])
       self.tipTrackedNode.SetMatrixTransformToParent(tip_matrix)
+      self.setTipMarkupColor(tipTracked=True)
       if logFlag:
         tracked = [tip_matrix.GetElement(0,3), tip_matrix.GetElement(1,3), tip_matrix.GetElement(2,3)]
         print('Tracked tip = %s' %tracked)
     else:
+      self.setTipMarkupColor(tipTracked=False)
       print('Tracked tip not updated (not enough confidence)')
     # Push confidence to Node
     self.needleConfidenceNode.SetText(str(confidence))
