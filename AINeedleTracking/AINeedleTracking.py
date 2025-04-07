@@ -1778,7 +1778,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Used for saving data from experiments
     self.count = None
     self.inferenceTime = None
-    self.prevDetection = None
+    self.prevDetection = [None, None, None]
 
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'PLANE_0')
@@ -2240,7 +2240,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def initializeTracking(self, useScanPlanes):
     self.count = 0              # Initialize sequence counter
     self.inferenceTime = 0
-    self.prevDetection = [False, False, False]
+    self.prevDetection = [False if plane else None for plane in useScanPlanes]
     # Reset tip transform nodes
     identityMatrix = vtk.vtkMatrix4x4()
     identityMatrix.Identity()
@@ -2750,21 +2750,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       # Update tracked tip L/R and I/S coordinates
         trackTipMatrix.SetElement(0,3, centerRAS[0])
         trackTipMatrix.SetElement(2,3, centerRAS[2])
-        if (self.prevDetection[1] and self.prevDetection[2]) is False: # No tip in other planes
+        if not (self.prevDetection[1] is True or self.prevDetection[2] is True): # No tip in other planes
           trackTipMatrix.SetElement(1,3, centerRAS[1])                 # Update COR slice position
         self.prevDetection[0] = True
       elif plane == 'SAG':
       # Update tracked tip A/P and I/S coordinates
         trackTipMatrix.SetElement(1,3, centerRAS[1])
         trackTipMatrix.SetElement(2,3, centerRAS[2])      
-        if (self.prevDetection[0] and self.prevDetection[2]) is False:  # No tip in other planes
+        if not (self.prevDetection[0] is True or self.prevDetection[2] is True): # No tip in other planes
           trackTipMatrix.SetElement(0,3, centerRAS[0])                  # Update SAG slice position
         self.prevDetection[1] = True
       elif plane == 'AX':
       # Update tracked tip L/R and A/P coordinates
         trackTipMatrix.SetElement(0,3, centerRAS[0])
         trackTipMatrix.SetElement(1,3, centerRAS[1])      
-        if (self.prevDetection[0] and self.prevDetection[1]) is False:  # No tip in other planes
+        if not (self.prevDetection[0] is True or self.prevDetection[1] is True): # No tip in other planes
           trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position
         self.prevDetection[2] = True
       # Set new tip value
