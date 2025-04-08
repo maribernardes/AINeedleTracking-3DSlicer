@@ -16,6 +16,7 @@ import sitkUtils
 import numpy as np
 
 from math import sqrt, pow
+import statistics
 
 import torch
 from monaiUtils.sitkMonaiIO import LoadSitkImaged, PushSitkImaged
@@ -45,6 +46,57 @@ class AINeedleTracking(ScriptedLoadableModule):
     # Additional initialization step after application startup is complete
     # TODO: include sample data and testing routines
     # slicer.app.connect("startupCompleted()", registerSampleData)
+
+################################################################################################################################################
+# Timestamp class
+################################################################################################################################################
+
+class TimestampTracker:
+  def __init__(self, step_names):
+    self.step_names = step_names
+    self.timestamps = {name: [] for name in step_names}
+
+  def clear(self):
+    for key in self.timestamps:
+        self.timestamps[key] = []
+
+  def mark(self, step_name):
+    now = time.perf_counter()
+    self.timestamps[step_name].append(now)
+
+  def elapsed_ms(self, step1, step2, cycle=-1):
+    t1 = self.timestamps[step1][cycle]
+    t2 = self.timestamps[step2][cycle]
+    return (t2 - t1) * 1000
+
+  def print_pairwise_durations(self, step_pairs):
+      all_durations = {pair: [] for pair in step_pairs}
+      # Get number of cycles based on any step's timestamp count
+      try:
+          num_cycles = len(next(iter(self.timestamps.values())))
+      except StopIteration:
+          print("No timestamps available.")
+          return
+      # Per-cycle durations
+      for i in range(num_cycles):
+          print(f"\nCycle {i+1}")
+          for s1, s2 in step_pairs:
+              try:
+                  delta = self.elapsed_ms(s1, s2, cycle=i)
+                  all_durations[(s1, s2)].append(delta)
+                  print(f"{s1} → {s2}: {delta:.2f} ms")
+              except (IndexError, KeyError):
+                  print(f"{s1} → {s2}: not enough data")
+      # Summary stats
+      print("\n=== Mean and Std Deviation ===")
+      for s1, s2 in step_pairs:
+          durations = all_durations[(s1, s2)]
+          if durations:
+              mean_val = statistics.mean(durations)
+              std_val = statistics.stdev(durations) if len(durations) > 1 else 0
+              print(f"{s1} → {s2}: mean = {mean_val:.2f} ms | std = {std_val:.2f} ms")
+          else:
+              print(f"{s1} → {s2}: no data")
 
 ################################################################################################################################################
 # Custom Widget  - Separator
@@ -90,6 +142,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.logic = None
     self._parameterNode = None
     self._updatingGUIFromParameterNode = False
+    
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -901,13 +954,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.windowSize = None
     self.minTipSize = None
     self.minShaftSize = None
-    
-    self.processingTime = None
-    self.inferenceTime = None
 
-    
+    # Timestamp
+    self.tracker = TimestampTracker(['image_received', 'image_prepared', 'needle_segmented', 'tip_tracked', 'plan_updated'])
+
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
+    self.logic.tracker = self.tracker
   
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
@@ -1412,7 +1465,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # print('%s, %s, %s, %s, %s, %s' %(modelDefined, rtNodesDefined, serverDefined, clientDefined, transformDefined, targetDefined))
     self.startTrackingButton.enabled = modelDefined and rtNodesDefined and serverDefined and clientDefined and transformDefined and targetDefined and not self.isTrackingOn
     self.stopTrackingButton.enabled = self.isTrackingOn
-  
     
   def updateModelList(self):
     # Clear combo box
@@ -1488,8 +1540,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('UI: startTracking()')
     self.isTrackingOn = True
     self.updateButtons()
-    self.processingTime = []
-    self.inferenceTime = []
 
     # Store selected parameters
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
@@ -1559,18 +1609,21 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # Create listener to image sequence node (considering phase image comes after magnitude)
     if self.useScanPlanes[0] is True:
+      self.tracker.mark('image_received')
       self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
       else:
         self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
     if self.useScanPlanes[1] is True:
+      self.tracker.mark('image_received')
       self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
       else:
         self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
     if self.useScanPlanes[2] is True:
+      self.tracker.mark('image_received')
       self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
@@ -1581,16 +1634,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   def stopTracking(self):
     self.isTrackingOn = False
     self.updateButtons()
-    # Calculate mean processing time
-    time_array = np.array(self.processingTime)
-    mean_value = np.mean(time_array)
-    std_deviation = np.std(time_array)
-    print('Total # of frames: %i' %len(time_array))
-    print('Mean Processing Time: %.2f+-%.2f' %(mean_value, std_deviation))
-    time_array = np.array(self.inferenceTime)
-    mean_value = np.mean(time_array)
-    std_deviation = np.std(time_array)    
-    print('Mean Inference Time: %.2f+-%.2f' %(mean_value, std_deviation))
+    self.tracker.print_pairwise_durations([
+      ('image_received', 'image_prepared'),
+      ('image_prepared', 'needle_segmented'),
+      ('needle_segmented', 'tip_tracked'),
+      ('tip_tracked', 'plan_updated')
+    ])
+    self.tracker.clear()
     #TODO: Define what should to be refreshed
     print('UI: stopTracking()')
     if self.useScanPlanes[0] is True:
@@ -1681,16 +1731,19 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   #TODO: Make a generic version that checks which plane is responsible for the callback
   def receivedImagePlane0(self, caller=None, event=None):
+    self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[0]:
       self.getNeedle('COR',self.firstVolumePlane0, self.secondVolumePlane0)
 
   def receivedImagePlane1(self, caller=None, event=None):
+    self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[1]:
       self.getNeedle('SAG',self.firstVolumePlane1, self.secondVolumePlane1)
     
   def receivedImagePlane2(self, caller=None, event=None):
+    self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[2]:
       self.getNeedle('AX',self.firstVolumePlane2, self.secondVolumePlane2)
@@ -1706,14 +1759,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('PLANE = %s' %plane)
     # Execute one tracking cycle
     if self.isTrackingOn:
-      start_time = time.time()
       logFlag = self.logFlagCheckBox.checked
       phaseUnwrap = self.phaseUnwrapCheckBox.checked
       # Get needle tip
-      (confidence, inference_time) = self.logic.getNeedle(plane, firstVolume, secondVolume, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
-      elapsed_time = time.time() - start_time
-      self.processingTime.append(elapsed_time)
-      self.inferenceTime.append(inference_time)
+      confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       if confidence is None:
         print('Tracking failed')
       else:
@@ -1747,9 +1796,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.pushTipToRobot is True:
           self.logic.pushTipToIGTLink(self.robotIGTLClientNode)
           print('Tip pushed to robot')
-      print(f"Elapsed time: %f seconds" %elapsed_time)
-      print(f"Inference time: %f seconds" %inference_time)
       print('____________________')
+
 ################################################################################################################################################
 # Logic Class
 ################################################################################################################################################
@@ -1759,6 +1807,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     ScriptedLoadableModuleLogic.__init__(self)
     self.cliParamNode = None
+
+    # Timestamp
+    self.tracker = None
 
     # Image file writer
     self.path = os.path.dirname(os.path.abspath(__file__))
@@ -1775,9 +1826,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.sitk_mask1 = None
     self.sitk_mask2 = None
     
-    # Used for saving data from experiments
-    self.count = None
-    self.inferenceTime = None
+    # Previous tip detection in each scan plane
     self.prevDetection = [None, None, None]
 
     # Check if PLANE_0 node exists, if not, create a new one
@@ -2238,8 +2287,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
   # Reset tracking values
   def initializeTracking(self, useScanPlanes):
-    self.count = 0              # Initialize sequence counter
-    self.inferenceTime = 0
     self.prevDetection = [False if plane else None for plane in useScanPlanes]
     # Reset tip transform nodes
     identityMatrix = vtk.vtkMatrix4x4()
@@ -2361,14 +2408,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if plane=='COR':    # PLAN_0
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane0TransformNode)
       connectionNode.PushNode(self.scanPlane0TransformNode)
+      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane0TransformNode)
     elif plane=='SAG':  # PLAN_1
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane1TransformNode)
       connectionNode.PushNode(self.scanPlane1TransformNode)
+      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane1TransformNode)
     if plane=='AX':     # PLAN_2
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane2TransformNode)
       connectionNode.PushNode(self.scanPlane2TransformNode)
+      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane2TransformNode)
 
   def pushTargetToIGTLink(self, connectionNode, targetNode):
@@ -2401,8 +2451,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
   def getNeedle(self, plane, firstVolume, secondVolume, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
-    self.count += 1    
-    print('Image #%i' %self.count)
+    image_count = len(self.tracker.timestamps['image_received'])
+    print('Image #%i' %(image_count))
 
     ######################################
     ##                                  ##
@@ -2461,16 +2511,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
-      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
       if (in_channels!=1):
         self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
-        self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+        self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
       if in_channels == 3:
         self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
-        self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+        self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
       if sitk_mask is not None:
         self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask')
-        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName))
+        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
 
     ######################################
     ##                                  ##
@@ -2496,8 +2546,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ## Step 2: Inference                ##
     ##                                  ##
     ######################################
-
-    start_time = time.time()
+    self.tracker.mark('image_prepared')
     # Apply pre_transforms
     if plane == 'SAG':
       pre_transforms = self.pre_transforms_sag
@@ -2516,12 +2565,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Apply post-transform
     data = self.post_transforms(data)
     sitk_output = data['pred']
-    inference_time = time.time() - start_time
-        
+    self.tracker.mark('needle_segmented')
+
     # Push segmentation to Slicer
     self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode)
     if debugFlag:
-      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
     ######################################
     ##                                  ##
@@ -2534,8 +2583,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_shaft = (sitk_output==1)
 
     if debugFlag:
-      self.saveSitkImage(sitk_tip, name='debug_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
-      self.saveSitkImage(sitk_shaft, name='debug_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+      self.saveSitkImage(sitk_tip, name='debug_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+      self.saveSitkImage(sitk_shaft, name='debug_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
     # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
@@ -2590,7 +2639,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
       if debugFlag:
-        self.saveSitkImage(sitk_selected_shaft, name='debug_selected_shaft_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+        self.saveSitkImage(sitk_selected_shaft, name='debug_selected_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         self.pushSitkToSlicerVolume(sitk_selected_shaft, 'debug_selected_shaft')
     
     # Select largest tip
@@ -2606,7 +2655,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
       if debugFlag:
-        self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+        self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         self.pushSitkToSlicerVolume(sitk_selected_tip, 'debug_selected_tip')
 
     # Check tip and shaft connection
@@ -2673,7 +2722,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           print('Segmented tip = None')
           # Does not update anything
         self.setTipMarkupColor(tipTracked=False)  
-        return (None, inference_time)  # NONE (no tip, no shaft)
+        return None  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
@@ -2704,7 +2753,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       elif shaft_size >= minShaft:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
         if debugFlag:
-          self.saveSitkImage(sitk_skeleton, name='debug_skeleton_'+str(self.count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+          self.saveSitkImage(sitk_skeleton, name='debug_skeleton_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
         tip_center = shaft_tip          
         confidence = 2   # MEDIUM LOW (small tip, big shaft) - Use shaft tip
@@ -2779,6 +2828,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       print('Tracked tip not updated (not enough confidence)')
     # Push confidence to Node
     self.needleConfidenceNode.SetText(str(confidence))
-    return (confidence, inference_time)
+    self.tracker.mark('tip_tracked')
+    return confidence
   
   ############################################
