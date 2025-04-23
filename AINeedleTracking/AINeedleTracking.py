@@ -966,6 +966,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Initialize module logic
     self.logic = AINeedleTrackingLogic()
     self.logic.tracker = self.tracker
+    self.logic.setConfidenceLevelLabels(self.confidenceLevelLabels)
   
     # Make sure parameter node is initialized (needed for module reload)
     self.initializeParameterNode()
@@ -1561,7 +1562,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.updateScanPlane = self.updateScanPlaneCheckBox.checked 
     self.centerScanAtTip = self.centerAtTipCheckBox.checked 
     self.confidenceLevel = (self.confidenceComboBox.currentIndex + 1)
-    confidenceText = self.getConfidenceText(self.confidenceLevel)
+    confidenceText = self.logic.getConfidenceText(self.confidenceLevel)
     print('inputMode = %s, inputVolume = %s, inputChannels = %s, model = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.model))
     print('Tracking with confidence = %s' %confidenceText)
     print('____________________')
@@ -1758,13 +1759,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print(caller.GetName())
     if self.useScanPlanes[2]:
       self.getNeedle('AX',self.firstVolumePlane2, self.secondVolumePlane2)
-
-  def getConfidenceText(self, confidenceLevel):
-      # Search for the number in the list and return the corresponding text
-      for text, value in self.confidenceLevelLabels:
-          if value == confidenceLevel:
-              return text
-      return None
       
   def getNeedle(self, plane, firstVolume, secondVolume):
     print('PLANE = %s' %plane)
@@ -1777,7 +1771,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       if confidence is None:
         print('Tracking failed')
       else:
-        confidenceText = self.getConfidenceText(confidence)
+        confidenceText = self.logic.getConfidenceText(confidence)
         print('Tracked with %s confidence' %confidenceText)          
         if self.updateScanPlane is True:   
           if confidence >= self.confidenceLevel:
@@ -1841,6 +1835,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Previous tip detection in each scan plane
     self.prevDetection = [None, None, None]
 
+    # Confidence level labels
+    self.confidenceLevelLabels = None
+    
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'PLANE_0')
     if self.scanPlane0TransformNode is None:
@@ -1889,32 +1886,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.tipTrackedNode = slicer.vtkMRMLLinearTransformNode()
         self.tipTrackedNode.SetName('CurrentTrackedTip')
         slicer.mrmlScene.AddNode(self.tipTrackedNode)
-    '''
-    # Check if zFrame tracked tip node exists, if not, create a new one
-    self.tipTrackedZNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode','CurrentTrackedTipZ')
-    if self.tipTrackedZNode is None:
-        self.tipTrackedZNode = slicer.vtkMRMLLinearTransformNode()
-        self.tipTrackedZNode.SetName('CurrentTrackedTipZ')
-        self.tipTrackedZNode.SetHideFromEditors(True)
-        slicer.mrmlScene.AddNode(self.tipTrackedZNode)   
-    # Check if WorldToZFrame transform node exists, if not, create a new one
-    self.worldToZFrameNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'WorldToZFrame')
-    if self.worldToZFrameNode is None:
-        self.worldToZFrameNode = slicer.vtkMRMLLinearTransformNode()
-        self.worldToZFrameNode.SetName('WorldToZFrame')
-        self.worldToZFrameNode.SetHideFromEditors(True)
-        slicer.mrmlScene.AddNode(self.worldToZFrameNode)
-    # Check if TargetZ point list node exists, if not, create a new one
-    self.targetZNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode','TargetZ')
-    if self.targetZNode is None:
-        self.targetZNode = slicer.vtkMRMLMarkupsFiducialNode()
-        self.targetZNode.SetName('TargetZ')
-        self.targetZNode.SetHideFromEditors(True)
-        slicer.mrmlScene.AddNode(self.targetZNode)
-    displayNode = self.targetZNode.GetDisplayNode()
-    if displayNode:
-      displayNode.SetVisibility(False)
-    '''
+
     # Check if Tip point list node exists, if not, create a new one
     self.tipMarkupsNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode', 'NeedleTip' )
     if self.tipMarkupsNode is None:
@@ -1956,14 +1928,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('CenterScanAtTip', 'False')     
     if not parameterNode.GetParameter('ConfidenceLevel'): 
       parameterNode.SetParameter('ConfidenceLevel', '2')   # Index of selected option
-    
     if not parameterNode.GetParameter('PushTipToRobot'): 
       parameterNode.SetParameter('PushTipToRobot', 'False')  
-    '''
-    if not parameterNode.GetParameter('PushTargetToRobot'): 
-      parameterNode.SetParameter('PushTargetToRobot', 'False')
-    '''
-
     if not parameterNode.GetParameter('ScreenLog'):
       parameterNode.SetParameter('ScreenLog', 'False')     
     if not parameterNode.GetParameter('Debug'):
@@ -2131,6 +2097,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
         return sitk_line.TransformIndexToPhysicalPoint(extremity2)
 
+  def setConfidenceLevelLabels(self, labels):
+    self.confidenceLevelLabels = labels
+  
+  def getConfidenceText(self, confidenceLevel):
+    # Search for the number in the list and return the corresponding text
+    for text, value in self.confidenceLevelLabels:
+        if value == confidenceLevel:
+            return text
+    return None
+    
   # Return string with the image direction name
   def getDirectionName(self, sitk_image):
     AX_DIR = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
@@ -2855,7 +2831,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.setTipMarkupColor(tipTracked=False)
       print('Tracked tip not updated (not enough confidence)')
     # Push confidence to Node
-    self.needleConfidenceNode.SetText(str(confidence))
+    self.needleConfidenceNode.SetText(str(time.perf_counter()) + '; ' + self.getConfidenceText(confidence) + '; '+ str(confidence))
     self.tracker.mark('tip_tracked')
     return confidence
   
