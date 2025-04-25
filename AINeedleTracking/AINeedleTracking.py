@@ -1608,33 +1608,35 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
     self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.model)
+    '''
     self.logic.initializeMasks(self.segmentationNodePlane0, self.firstVolumePlane0, 
                                self.segmentationNodePlane1, self.firstVolumePlane1, 
                                self.segmentationNodePlane2, self.firstVolumePlane2)
     
-    '''
+    
     # Initialize zFrame transform
     if self.pushTipToRobot == True:
       self.logic.initializeZFrame(self.zFrameTransform)
     '''
+    
     # Create listener to image sequence node (considering phase image comes after magnitude)
     if self.useScanPlanes[0] is True:
       self.tracker.mark('image_received')
-      self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0) 
+      self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0, self.segmentationNodePlane0) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
       else:
         self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
     if self.useScanPlanes[1] is True:
       self.tracker.mark('image_received')
-      self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1) 
+      self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1, self.segmentationNodePlane1) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
       else:
         self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
     if self.useScanPlanes[2] is True:
       self.tracker.mark('image_received')
-      self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2) 
+      self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2, self.segmentationNodePlane2) 
       if self.inputChannels==1:
         self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
       else:
@@ -1746,28 +1748,28 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[0]:
-      self.getNeedle('COR',self.firstVolumePlane0, self.secondVolumePlane0)
+      self.getNeedle('COR',self.firstVolumePlane0, self.secondVolumePlane0, self.segmentationNodePlane0)
 
   def receivedImagePlane1(self, caller=None, event=None):
     self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[1]:
-      self.getNeedle('SAG',self.firstVolumePlane1, self.secondVolumePlane1)
+      self.getNeedle('SAG',self.firstVolumePlane1, self.secondVolumePlane1, self.segmentationNodePlane1)
     
   def receivedImagePlane2(self, caller=None, event=None):
     self.tracker.mark('image_received')
     print(caller.GetName())
     if self.useScanPlanes[2]:
-      self.getNeedle('AX',self.firstVolumePlane2, self.secondVolumePlane2)
+      self.getNeedle('AX',self.firstVolumePlane2, self.secondVolumePlane2, self.segmentationNodePlane2)
       
-  def getNeedle(self, plane, firstVolume, secondVolume):
+  def getNeedle(self, plane, firstVolume, secondVolume, segMask):
     print('PLANE = %s' %plane)
     # Execute one tracking cycle
     if self.isTrackingOn:
       logFlag = self.logFlagCheckBox.checked
       phaseUnwrap = self.phaseUnwrapCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
+      confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, segMask, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       if confidence is None:
         print('Tracking failed')
       else:
@@ -2453,7 +2455,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     connectionNode.PushNode(self.needleConfidenceNode)
     connectionNode.UnregisterOutgoingMRMLNode(self.needleConfidenceNode)
 
-  def getNeedle(self, plane, firstVolume, secondVolume, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
+  def getNeedle(self, plane, firstVolume, secondVolume, segMask, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
     image_count = len(self.tracker.timestamps['image_received'])
     print('Image #%i' %(image_count))
@@ -2464,6 +2466,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################
 
+    '''
     # Segmentation mask (optional)
     if plane=='COR':
       sitk_mask = self.sitk_mask0
@@ -2473,6 +2476,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_mask = self.sitk_mask2
     else:
       sitk_mask = None
+    '''
+    # Update mask
+    sitk_mask = self.getMaskFromSegmentation(segMask, firstVolume)    # Update mask (None if nothing in segmentationNode or firstVolume)
+
 
     # Get sitk images from MRML volume nodes 
     if (imageConversion == 'RealImag'): # Convert to magnitude/phase
