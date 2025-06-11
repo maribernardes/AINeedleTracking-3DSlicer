@@ -61,7 +61,8 @@ class TimestampTracker:
         self.timestamps[key] = []
 
   def mark(self, step_name):
-    now = time.perf_counter()
+    #now = time.perf_counter()
+    now = time.time()
     self.timestamps[step_name].append(now)
 
   def elapsed_ms(self, step1, step2, cycle=-1):
@@ -2838,7 +2839,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.setTipMarkupColor(tipTracked=False)
       print('Tracked tip not updated (not enough confidence)')
     # Push confidence to Node
-    self.needleConfidenceNode.SetText(str(time.perf_counter()) + '; ' + self.getConfidenceText(confidence) + '; '+ str(confidence))
+    self.needleConfidenceNode.SetText(str(time.time()) + '; ' + self.getConfidenceText(confidence) + '; '+ str(confidence)) 
     self.tracker.mark('tip_tracked')
     return confidence
   
