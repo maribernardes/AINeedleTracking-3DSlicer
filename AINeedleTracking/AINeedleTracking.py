@@ -58,7 +58,7 @@ class TimestampTracker:
 
   def clear(self):
     for key in self.timestamps:
-        self.timestamps[key] = []
+      self.timestamps[key] = []
 
   def mark(self, step_name):
     #now = time.perf_counter()
@@ -72,32 +72,37 @@ class TimestampTracker:
 
   def print_pairwise_durations(self, step_pairs):
       all_durations = {pair: [] for pair in step_pairs}
+      for key1, key2 in step_pairs:
+        len1 = len(self.timestamps.get(key1, []))
+        len2 = len(self.timestamps.get(key2, []))
+        print(f"{key1}: {len1} values, {key2}: {len2} values")
+      
       # Get number of cycles based on any step's timestamp count
       try:
-          num_cycles = len(next(iter(self.timestamps.values())))
+        num_cycles = len(next(iter(self.timestamps.values())))
       except StopIteration:
-          print("No timestamps available.")
-          return
+        print("No timestamps available.")
+        return
       # Per-cycle durations
       for i in range(num_cycles):
-          print(f"\nCycle {i+1}")
-          for s1, s2 in step_pairs:
-              try:
-                  delta = self.elapsed_ms(s1, s2, cycle=i)
-                  all_durations[(s1, s2)].append(delta)
-                  print(f"{s1} → {s2}: {delta:.2f} ms")
-              except (IndexError, KeyError):
-                  print(f"{s1} → {s2}: not enough data")
+        print(f"\nImage #{i+1}")
+        for s1, s2 in step_pairs:
+          try:
+            delta = self.elapsed_ms(s1, s2, cycle=i)
+            all_durations[(s1, s2)].append(delta)
+            print(f"{s1} → {s2}: {delta:.2f} ms")
+          except (IndexError, KeyError):
+            print(f"{s1} → {s2}: not enough data")
       # Summary stats
       print("\n=== Mean and Std Deviation ===")
       for s1, s2 in step_pairs:
-          durations = all_durations[(s1, s2)]
-          if durations:
-              mean_val = statistics.mean(durations)
-              std_val = statistics.stdev(durations) if len(durations) > 1 else 0
-              print(f"{s1} → {s2}: mean = {mean_val:.2f} ms | std = {std_val:.2f} ms")
-          else:
-              print(f"{s1} → {s2}: no data")
+        durations = all_durations[(s1, s2)]
+        if durations:
+          mean_val = statistics.mean(durations)
+          std_val = statistics.stdev(durations) if len(durations) > 1 else 0
+          print(f"{s1} → {s2}: mean = {mean_val:.2f} ms | std = {std_val:.2f} ms")
+        else:
+          print(f"{s1} → {s2}: no data")
 
 ################################################################################################################################################
 # Custom Widget  - Separator
@@ -1609,16 +1614,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
     self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.model)
-    '''
-    self.logic.initializeMasks(self.segmentationNodePlane0, self.firstVolumePlane0, 
-                               self.segmentationNodePlane1, self.firstVolumePlane1, 
-                               self.segmentationNodePlane2, self.firstVolumePlane2)
-    
-    
-    # Initialize zFrame transform
-    if self.pushTipToRobot == True:
-      self.logic.initializeZFrame(self.zFrameTransform)
-    '''
     
     # Create listener to image sequence node (considering phase image comes after magnitude)
     if self.useScanPlanes[0] is True:
@@ -1773,6 +1768,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, segMask, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
       if confidence is None:
         print('Tracking failed')
+        self.tracker.mark('plan_updated') # Consider the scan "update" is to keep current position
       else:
         confidenceText = self.logic.getConfidenceText(confidence)
         print('Tracked with %s confidence' %confidenceText)          
@@ -1801,6 +1797,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='SAG')
           else:
             print('Scan plane NOT updated - No confidence on needle tracking')
+            self.tracker.mark('plan_updated') # Consider the scan "update" is to keep current position
+
         if self.pushTipToRobot is True:
           self.logic.pushTipToIGTLink(self.robotIGTLClientNode)
           self.logic.pushTipConfidenceToIGTLink(self.robotIGTLClientNode)
@@ -2467,20 +2465,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################
 
-    '''
-    # Segmentation mask (optional)
-    if plane=='COR':
-      sitk_mask = self.sitk_mask0
-    elif plane=='SAG':
-      sitk_mask = self.sitk_mask1
-    elif plane=='AX':
-      sitk_mask = self.sitk_mask2
-    else:
-      sitk_mask = None
-    '''
     # Update mask
     sitk_mask = self.getMaskFromSegmentation(segMask, firstVolume)    # Update mask (None if nothing in segmentationNode or firstVolume)
-
 
     # Get sitk images from MRML volume nodes 
     if (imageConversion == 'RealImag'): # Convert to magnitude/phase
@@ -2734,6 +2720,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           print('Segmented tip = None')
           # Does not update anything
         self.setTipMarkupColor(tipTracked=False)  
+        self.tracker.mark('tip_tracked') # Consider no tip to be the tracked tip result
         return None  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
