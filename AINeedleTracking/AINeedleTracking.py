@@ -1860,15 +1860,33 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.scanPlane2TransformNode.SetName('PLANE_2')
         slicer.mrmlScene.AddNode(self.scanPlane2TransformNode)
     self.initializeScanPlane(plane='AX')
-    # Check if needle labelmap node exists, if not, create a new one
-    self.needleLabelMapNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap')
-    if self.needleLabelMapNode is None:
-        self.needleLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
-        self.needleLabelMapNode.SetName('NeedleLabelMap')
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode)
+    # Check if needleLabelMap0 node exists, if not, create a new one
+    self.needleLabelMapNode0 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_0')
+    if self.needleLabelMapNode0 is None:
+        self.needleLabelMapNode0 = slicer.vtkMRMLLabelMapVolumeNode()
+        self.needleLabelMapNode0.SetName('NeedleLabelMap_0')
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode0)
         colorTableNode = self.createColorTable()
-        self.needleLabelMapNode.CreateDefaultDisplayNodes()
-        self.needleLabelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+        self.needleLabelMapNode0.CreateDefaultDisplayNodes()
+        self.needleLabelMapNode0.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+    # Check if needleLabelMap1 node exists, if not, create a new one
+    self.needleLabelMapNode1 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_1')
+    if self.needleLabelMapNode1 is None:
+        self.needleLabelMapNode1 = slicer.vtkMRMLLabelMapVolumeNode()
+        self.needleLabelMapNode1.SetName('NeedleLabelMap_1')
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode1)
+        colorTableNode = self.createColorTable()
+        self.needleLabelMapNode1.CreateDefaultDisplayNodes()
+        self.needleLabelMapNode1.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+    # Check if needleLabelMap2 node exists, if not, create a new one
+    self.needleLabelMapNode2 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_2')
+    if self.needleLabelMapNode2 is None:
+        self.needleLabelMapNode2 = slicer.vtkMRMLLabelMapVolumeNode()
+        self.needleLabelMapNode2.SetName('NeedleLabelMap_2')
+        slicer.mrmlScene.AddNode(self.needleLabelMapNode2)
+        colorTableNode = self.createColorTable()
+        self.needleLabelMapNode2.CreateDefaultDisplayNodes()
+        self.needleLabelMapNode2.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())        
     # Check if text node exists, if not, create a new one
     self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
     if self.needleConfidenceNode is None:
@@ -1980,11 +1998,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
   def createColorTable(self):
+    colorTableName = 'NeedleColorMap'
+    # Check if the color table already exists
+    existingNode = slicer.util.getFirstNodeByClassByName("vtkMRMLColorTableNode", colorTableName)
+    if existingNode:
+        return existingNode
+    # If non existant, create a new one
     label_list = [("shaft", 1, 0.2, 0.5, 0.8), ('tip', 2, 1.0, 0.8, 0.7)]
     colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
     colorTableNode.SetHideFromEditors(True)
     colorTableNode.SetTypeToUser()
-    colorTableNode.SetName('NeedleColorMap')
+    colorTableNode.SetName(colorTableName)
     slicer.mrmlScene.AddNode(colorTableNode); 
     colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
     colorTableNode.UnRegister(None)
@@ -2546,12 +2570,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ######################################
     self.tracker.mark('image_prepared')
     # Apply pre_transforms
-    if plane == 'SAG':
-      pre_transforms = self.pre_transforms_sag
-    elif plane == 'COR':
-      pre_transforms = self.pre_transforms_cor
-    else:
+    if plane == 'AX':
       pre_transforms = self.pre_transforms_ax
+    elif plane == 'SAG':
+      pre_transforms = self.pre_transforms_sag
+    else:
+      pre_transforms = self.pre_transforms_cor
     data = pre_transforms(input_dict)
     # Evaluate model
     self.model.eval()
@@ -2566,7 +2590,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tracker.mark('needle_segmented')
 
     # Push segmentation to Slicer
-    self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode)
+    if plane == 'AX':
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode2)
+    elif plane == 'SAG':
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode1)
+    else:
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode0)
+    
     if debugFlag:
       self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
