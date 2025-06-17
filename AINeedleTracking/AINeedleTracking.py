@@ -1860,33 +1860,19 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.scanPlane2TransformNode.SetName('PLANE_2')
         slicer.mrmlScene.AddNode(self.scanPlane2TransformNode)
     self.initializeScanPlane(plane='AX')
-    # Check if needleLabelMap0 node exists, if not, create a new one
-    self.needleLabelMapNode0 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_0')
-    if self.needleLabelMapNode0 is None:
-        self.needleLabelMapNode0 = slicer.vtkMRMLLabelMapVolumeNode()
-        self.needleLabelMapNode0.SetName('NeedleLabelMap_0')
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode0)
+    # Check if needleLabelMap nodes exists, if not, create a new one
+    self.needleLabelMapNodes = []
+    for i in range(3):
+      name = f'NeedleLabelMap_{i}'
+      labelMapNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode', name)
+      if labelMapNode is None:
+        labelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
+        labelMapNode.SetName(name)
+        slicer.mrmlScene.AddNode(labelMapNode)
         colorTableNode = self.createColorTable()
-        self.needleLabelMapNode0.CreateDefaultDisplayNodes()
-        self.needleLabelMapNode0.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
-    # Check if needleLabelMap1 node exists, if not, create a new one
-    self.needleLabelMapNode1 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_1')
-    if self.needleLabelMapNode1 is None:
-        self.needleLabelMapNode1 = slicer.vtkMRMLLabelMapVolumeNode()
-        self.needleLabelMapNode1.SetName('NeedleLabelMap_1')
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode1)
-        colorTableNode = self.createColorTable()
-        self.needleLabelMapNode1.CreateDefaultDisplayNodes()
-        self.needleLabelMapNode1.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
-    # Check if needleLabelMap2 node exists, if not, create a new one
-    self.needleLabelMapNode2 = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','NeedleLabelMap_2')
-    if self.needleLabelMapNode2 is None:
-        self.needleLabelMapNode2 = slicer.vtkMRMLLabelMapVolumeNode()
-        self.needleLabelMapNode2.SetName('NeedleLabelMap_2')
-        slicer.mrmlScene.AddNode(self.needleLabelMapNode2)
-        colorTableNode = self.createColorTable()
-        self.needleLabelMapNode2.CreateDefaultDisplayNodes()
-        self.needleLabelMapNode2.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())        
+        labelMapNode.CreateDefaultDisplayNodes()
+        labelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+      self.needleLabelMapNodes.append(labelMapNode) 
     # Check if text node exists, if not, create a new one
     self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
     if self.needleConfidenceNode is None:
@@ -2591,11 +2577,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Push segmentation to Slicer
     if plane == 'AX':
-      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode2)
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNodes[2])
     elif plane == 'SAG':
-      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode1)
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNodes[1])
     else:
-      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNode0)
+      self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNodes[0])
     
     if debugFlag:
       self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
