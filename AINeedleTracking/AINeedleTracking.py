@@ -663,22 +663,68 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.layout.addWidget(optionalCollapsibleButton)
     optionalFormLayout = qt.QFormLayout(optionalCollapsibleButton)
 
-    
-    sectionTargetTip = SeparatorWidget('Target and Needle Tip')
+    sectionSmoothTip = SeparatorWidget('Smooth tracking')
+    optionalFormLayout.addRow(sectionSmoothTip)
+
+        
+    # --- Smoothing controls ---
+    smoothingHBox = qt.QHBoxLayout()
+    self.smoothTipCheckBox = qt.QCheckBox()
+    self.smoothTipCheckBox.checked = False
+    smoothingHBox.addWidget(self.smoothTipCheckBox)
+
+    self.smoothingMethodCombo = qt.QComboBox()
+    self.smoothingMethodCombo.addItems(["EMA", "Kalman"])
+    self.smoothingMethodCombo.setCurrentIndex(0)
+    smoothingHBox.addWidget(qt.QLabel("Method"))
+    smoothingHBox.addWidget(self.smoothingMethodCombo)
+
+    # EMA parameter
+    self.emaAlphaSlider = ctk.ctkSliderWidget()
+    self.emaAlphaSlider.decimals = 2
+    self.emaAlphaSlider.singleStep = 0.01
+    self.emaAlphaSlider.minimum = 0.01
+    self.emaAlphaSlider.maximum = 1.0
+    self.emaAlphaSlider.value = 0.50  # typical: 0.1–0.3
+    self.emaAlphaSlider.setToolTip("EMA alpha (higher = more responsive, less smoothing)")
+    optionalFormLayout.addRow("Tip smoothing", smoothingHBox)
+    optionalFormLayout.addRow("EMA α", self.emaAlphaSlider)
+
+    # Kalman parameters (simple, shared for xyz)
+    kalmanHBox = qt.QHBoxLayout()
+    self.kfProcessNoiseSlider = ctk.ctkSliderWidget()
+    self.kfProcessNoiseSlider.decimals = 3
+    self.kfProcessNoiseSlider.singleStep = 0.001
+    self.kfProcessNoiseSlider.minimum = 0.001
+    self.kfProcessNoiseSlider.maximum = 0.5
+    self.kfProcessNoiseSlider.value = 0.02
+    self.kfProcessNoiseSlider.setToolTip("Process noise (q). Higher = assumes faster motion")
+
+    self.kfMeasNoiseSlider = ctk.ctkSliderWidget()
+    self.kfMeasNoiseSlider.decimals = 2
+    self.kfMeasNoiseSlider.singleStep = 0.01
+    self.kfMeasNoiseSlider.minimum = 0.1
+    self.kfMeasNoiseSlider.maximum = 10.0
+    self.kfMeasNoiseSlider.value = 1.0
+    self.kfMeasNoiseSlider.setToolTip("Measurement noise (r). Higher = trust the model more")
+    kalmanHBox.addWidget(qt.QLabel("KF q"))
+    kalmanHBox.addWidget(self.kfProcessNoiseSlider)
+    kalmanHBox.addWidget(qt.QLabel("KF r"))
+    kalmanHBox.addWidget(self.kfMeasNoiseSlider)
+    optionalFormLayout.addRow(kalmanHBox)
+
+    # wire to parameter node / buttons
+    self.smoothTipCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.smoothingMethodCombo.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
+    self.emaAlphaSlider.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+    self.kfProcessNoiseSlider.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+    self.kfMeasNoiseSlider.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
+
+    sectionTargetTip = SeparatorWidget('Send Tip Coordinates')
     optionalFormLayout.addRow(sectionTargetTip)
 
     igtlHBoxLayout = qt.QHBoxLayout()   
-
-    # Push target coordinates to robot
-    '''
-    self.pushTargetToRobotCheckBox = qt.QCheckBox()
-    self.pushTargetToRobotCheckBox.checked = False
-    self.pushTargetToRobotCheckBox.setToolTip('If checked, pushes target position to robot in zFrame coordinates')
-    igtlHBoxLayout.addWidget(qt.QLabel('Push Target to Robot'))
-    igtlHBoxLayout.addWidget(self.pushTargetToRobotCheckBox)
-    igtlHBoxLayout.addItem(hSpacer)
-    '''
-
+    
     # Push tip coordinates to robot
     self.pushTipToRobotCheckBox = qt.QCheckBox()
     self.pushTipToRobotCheckBox.checked = False
@@ -794,7 +840,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     preprocessingHBoxLayout.addWidget(self.phaseUnwrapCheckBox)
     preprocessingHBoxLayout.addStretch()  
     advancedFormLayout.addRow(preprocessingHBoxLayout)
-    
+
+
+
     # Window size for sliding window
     self.windowSizeWidget = ctk.ctkSliderWidget()
     self.windowSizeWidget.singleStep = 4
@@ -1126,10 +1174,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('SecondVolumePlane2', self.secondVolumePlane2Selector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('MaskPlane2', self.segmentationMaskPlane2Selector.currentNodeID)
 
+    self._parameterNode.SetParameter('SmoothTip', 'True' if self.smoothTipCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('SmoothingMethod', 'EMA' if self.smoothingMethodCombo.currentIndex==0 else 'Kalman')
+    self._parameterNode.SetParameter('EMAAlpha', str(self.emaAlphaSlider.value))
+    self._parameterNode.SetParameter('KF_q', str(self.kfProcessNoiseSlider.value))
+    self._parameterNode.SetParameter('KF_r', str(self.kfMeasNoiseSlider.value))
+
     self._parameterNode.SetParameter('PushTipToRobot', 'True' if self.pushTipToRobotCheckBox.checked else 'False')
-    #self._parameterNode.SetParameter('PushTargetToRobot', 'True' if self.pushTargetToRobotCheckBox.checked else 'False')
-    #self._parameterNode.SetNodeReferenceID('zFrame', self.transformSelector.currentNodeID)
-    #self._parameterNode.SetNodeReferenceID('Target', self.targetSelector.currentNodeID)
     self._parameterNode.SetNodeReferenceID('RobotIGTLClient', self.robotConnectionSelector.currentNodeID)
 
     self._parameterNode.SetParameter('ScreenLog', 'True' if self.logFlagCheckBox.checked else 'False')
@@ -1585,9 +1636,14 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumePlane2 = self.secondVolumePlane2Selector.currentNode() 
     self.segmentationNodePlane2 = self.segmentationMaskPlane2Selector.currentNode()
 
+    # TODO: Send as parameter to logic?
+    self.logic.smoothingEnabled = self.smoothTipCheckBox.checked
+    self.logic.smoothingMethod = 'EMA' if self.smoothingMethodCombo.currentIndex==0 else 'Kalman'
+    self.logic.emaAlpha = float(self.emaAlphaSlider.value)
+    self.logic.kf_q = float(self.kfProcessNoiseSlider.value)
+    self.logic.kf_r = float(self.kfMeasNoiseSlider.value)
     self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.robotIGTLClientNode = self.robotConnectionSelector.currentNode()
-    #self.zFrameTransform = self.transformSelector.currentNode()
 
     self.debugFlag = self.debugFlagCheckBox.checked
     self.debugName = self.debugNameTextbox.text.strip()
@@ -1726,18 +1782,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.logic.initializeScanPlane(coordinates=viewCoordinates, plane='AX')
     self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='AX')
 
-  '''
-  def sendTarget(self):
-    print('UI: sendTarget()')
-    # Get parameters
-    self.target = self.targetSelector.currentNode()
-    self.robotIGTLClientNode = self.robotConnectionSelector.currentNode()
-    self.zFrameTransform = self.transformSelector.currentNode()
-    # Set zFrame transformation
-    self.logic.initializeZFrame(self.zFrameTransform)
-    # Push target
-    self.logic.pushTargetToIGTLink(self.robotIGTLClientNode, self.target)
-  '''
 
   #TODO: Make a generic version that checks which plane is responsible for the callback
   def receivedImagePlane0(self, caller=None, event=None):
@@ -1838,6 +1882,19 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Confidence level labels
     self.confidenceLevelLabels = None
+
+    # Smoothing state
+    self.smoothingEnabled = False
+    self.smoothingMethod = 'EMA'
+    self.emaAlpha = 0.2
+    self._emaPos = None  # np.array([x,y,z])
+    self.kf_q = 0.02
+    self.kf_r = 1.0
+    self._kf_initialized = False
+    self._kf_x = None  # state [x y z vx vy vz]^T
+    self._kf_P = None  # 6x6 covariance
+    self._last_update_ts = None  # seconds
+
     
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'PLANE_0')
@@ -1927,6 +1984,18 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('SetPlane2RAS'): 
       parameterNode.SetParameter('SetPlane2RAS', 'False')  
 
+    if not parameterNode.GetParameter('SmoothTip'):
+      parameterNode.SetParameter('SmoothTip', 'False')
+    if not parameterNode.GetParameter('SmoothingMethod'):
+      parameterNode.SetParameter('SmoothingMethod', 'EMA')  # or 'Kalman'
+    if not parameterNode.GetParameter('EMAAlpha'):
+      parameterNode.SetParameter('EMAAlpha', '0.5')
+    if not parameterNode.GetParameter('KF_q'):
+      parameterNode.SetParameter('KF_q', '0.02')
+    if not parameterNode.GetParameter('KF_r'):
+      parameterNode.SetParameter('KF_r', '1.0')
+
+
     if not parameterNode.GetParameter('UpdateScanPlane'): 
       parameterNode.SetParameter('UpdateScanPlane', 'False')   
     if not parameterNode.GetParameter('CenterScanAtTip'): 
@@ -1962,10 +2031,15 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     displayNode = self.tipMarkupsNode.GetDisplayNode()
     if displayNode:
         displayNode.SetGlyphScale(1)  # 1% glyph size
+        displayNode.SetProjectionVisibility(True) # Enable projection visibility in 2D views
+        displayNode.SetProjectionOpacity(0.6)
     else:
         # If the display node does not exist, create it and set the glyph size
         self.tipMarkupsNode.CreateDefaultDisplayNodes()
-        self.tipMarkupsNode.GetDisplayNode().SetGlyphScale(1)
+        displayNode = self.tipMarkupsNode.GetDisplayNode()
+        displayNode.SetGlyphScale(1)  # 1% glyph size
+        displayNode.SetProjectionVisibility(True) # Enable projection visibility in 2D views
+        displayNode.SetProjectionOpacity(0.6)
     self.setTipMarkupColor()
     # Set the parent transform to self.tipTrackedNode
     if self.tipTrackedNode:
@@ -2296,6 +2370,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     identityMatrix.Identity()
     self.tipSegmNode.SetMatrixTransformToParent(identityMatrix)    
     self.tipTrackedNode.SetMatrixTransformToParent(identityMatrix)    
+    # Reset smoothing
+    self._emaPos = None
+    self._kf_initialized = False
+    self._kf_x = None
+    self._kf_P = None
+    self._last_update_ts = None
 
   # Initialize AI model
   def initializeModel(self, inputMode, inputVolume, in_channels, modelName):
@@ -2426,33 +2506,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane2TransformNode)
 
-  '''
-  def pushTargetToIGTLink(self, connectionNode, targetNode):
-    # Apply zTransform to currentTip
-    self.targetZNode.CopyContent(targetNode)
-    dispNode = self.targetZNode.GetDisplayNode()
-    if dispNode:
-      dispNode.SetVisibility(False)
-    self.targetZNode.SetAndObserveTransformNodeID(self.worldToZFrameNode.GetID())
-    self.targetZNode.HardenTransform()
-    #  Push to IGTLink
-    connectionNode.RegisterOutgoingMRMLNode(self.targetZNode)
-    connectionNode.PushNode(self.targetZNode)
-    connectionNode.UnregisterOutgoingMRMLNode(self.targetZNode)
-  '''
-
   def pushTipToIGTLink(self, connectionNode):
-    '''
-    # Apply zTransform to currentTip
-    self.tipTrackedZNode.CopyContent(self.tipTrackedNode)
-    self.tipTrackedZNode.SetAndObserveTransformNodeID(self.worldToZFrameNode.GetID())
-    self.tipTrackedZNode.HardenTransform()
-    #  Push to IGTLink:
-    # zFrame
-    connectionNode.RegisterOutgoingMRMLNode(self.tipTrackedZNode)
-    connectionNode.PushNode(self.tipTrackedZNode)
-    connectionNode.UnregisterOutgoingMRMLNode(self.tipTrackedZNode)
-    '''
     # scanner frame
     connectionNode.RegisterOutgoingMRMLNode(self.tipTrackedNode)
     connectionNode.PushNode(self.tipTrackedNode)
@@ -2462,7 +2516,90 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # needle tracking confidence
     connectionNode.RegisterOutgoingMRMLNode(self.needleConfidenceNode)
     connectionNode.PushNode(self.needleConfidenceNode)
-    connectionNode.UnregisterOutgoingMRMLNode(self.needleConfidenceNode)
+    
+  #***** Smoothing helper functions *****#
+  def _now(self):
+    try:
+      return time.time()
+    except:
+      return None
+
+  def _apply_ema(self, z):
+    # z: np.array([x,y,z])
+    if self._emaPos is None:
+      self._emaPos = z.copy()
+    else:
+      a = float(self.emaAlpha)
+      self._emaPos = a*z + (1.0-a)*self._emaPos
+    return self._emaPos
+
+  def _kf_init(self, z):
+    # State: [pos; vel], start with zero velocity
+    self._kf_x = np.zeros((6,1), dtype=float)
+    self._kf_x[0:3,0] = z
+    self._kf_P = np.eye(6)*10.0  # fairly uncertain
+    self._kf_initialized = True
+
+  def _kf_mats(self, dt):
+    # Constant-velocity model per axis
+    F = np.eye(6)
+    F[0,3] = dt; F[1,4] = dt; F[2,5] = dt
+    H = np.zeros((3,6)); H[0,0]=H[1,1]=H[2,2]=1.0
+    # Process noise q scaled with standard CV model (per axis block)
+    q = float(self.kf_q)
+    q11 = (dt**4)/4.0 * q
+    q12 = (dt**3)/2.0 * q
+    q22 = (dt**2) * q
+    Q = np.zeros((6,6))
+    for i in range(3):
+      Q[i,i] += q11
+      Q[i,i+3] += q12
+      Q[i+3,i] += q12
+      Q[i+3,i+3] += q22
+    R = np.eye(3)*float(self.kf_r)
+    return F, H, Q, R
+
+  def _kf_predict(self, dt):
+    F, _, Q, _ = self._kf_mats(dt)
+    self._kf_x = F @ self._kf_x
+    self._kf_P = F @ self._kf_P @ F.T + Q
+
+  def _kf_update(self, z):
+    # z: np.array([x,y,z])
+    _, H, _, R = self._kf_mats(0.0)  # H, R do not depend on dt
+    z = z.reshape((3,1))
+    y = z - (H @ self._kf_x)
+    S = H @ self._kf_P @ H.T + R
+    K = self._kf_P @ H.T @ np.linalg.inv(S)
+    self._kf_x = self._kf_x + K @ y
+    I = np.eye(6)
+    self._kf_P = (I - K @ H) @ self._kf_P
+
+  def _apply_kf(self, z, ts_now):
+    if not self._kf_initialized:
+      self._kf_init(z)
+      self._last_update_ts = ts_now
+      return z
+    dt = 0.0
+    if self._last_update_ts is not None and ts_now is not None:
+      dt = max(0.0, ts_now - self._last_update_ts)
+    self._kf_predict(dt)
+    self._kf_update(z)
+    self._last_update_ts = ts_now
+    return self._kf_x[0:3,0].copy()
+
+  def smoothTip(self, proposed_xyz):
+    if not self.smoothingEnabled:
+      return proposed_xyz
+    z = np.array(proposed_xyz, dtype=float)
+    tnow = self._now()
+    if self.smoothingMethod == 'Kalman':
+      return self._apply_kf(z, tnow).tolist()
+    # default EMA
+    return self._apply_ema(z).tolist()
+
+  # *****************************
+
 
   def getNeedle(self, plane, firstVolume, secondVolume, segMask, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
     # Increment tracking counter
@@ -2604,7 +2741,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
     # if debugFlag:
       # self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip')
-    #if logFlag:
     #  if tip_dict is not None:
     #    for element in tip_dict:
     #      print('Tip Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
@@ -2621,6 +2757,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_shaft = self.connectShaftGaps(sitk_shaft)
     # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
+    
     # if debugFlag:
       # self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft')
     #if logFlag:
@@ -2649,6 +2786,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label, upperThreshold=shaft_label, insideValue=1, outsideValue=0)
       # Is 2nd largest a candidate?
       if len(shaft_dict)>1:
+        print('2 shafts')
         shaft_size2 = shaft_dict[1]['size']
         if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
@@ -2672,43 +2810,87 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
         self.pushSitkToSlicerVolume(sitk_selected_tip, 'debug_selected_tip')
 
+
     # Check tip and shaft connection
     connected = False
     if (shaft_label is not None) and (tip_label is not None):
-        connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # S1T1
-        if (connected is False):
-          if (tip_label2 is not None): #Tip1 not connected to shaft1 - Check Tip2
+      connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # T1S1 - Go to next step (confidence)
+      if (connected is False):
+        if (shaft_label2 is not None): #Tip1 not connected to shaft1 - Check tip1 and shaft2
+          sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
+          connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #T1S2
+          if (connected is True): #Change selection to shaft2
+            shaft_label = shaft_label2
+            shaft_size = shaft_size2
+            sitk_selected_shaft = sitk_selected_shaft2
+          elif (tip_label2 is not None): #Tip1 not connected to shaft2 - Check Tip2 and shaft 1
             sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)         
-            connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #S1T2
+            connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #T2S1
             if connected is True: #Change selection to tip2
               tip_label = tip_label2
               tip_center = tip_center2
               tip_size = tip_size2
               sitk_selected_tip = sitk_selected_tip2
-            elif (shaft_label2 is not None): #Tip2 not connected to shaft1 - Check shaft2
+            elif (tip_label2 is not None): #Tip2 not connected to shaft1 - Check Tip2 with shaft 2
+              connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft2) #S2T2
+              if (connected is True): #Change selection to tip2 and shaft2
+                tip_label = tip_label2
+                tip_center = tip_center2
+                tip_size = tip_size2
+                sitk_selected_tip = sitk_selected_tip2
+                shaft_label = shaft_label2
+                shaft_size = shaft_size2
+                sitk_selected_shaft = sitk_selected_shaft2                
+        elif (tip_label2 is not None): #Tip1 not connected to shaft1 and NO shaft 2 - Check Tip2
+          sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)         
+          connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #T2S1
+          if (connected is True): #Change selection to tip2
+            tip_label = tip_label2
+            tip_center = tip_center2
+            tip_size = tip_size2
+            sitk_selected_tip = sitk_selected_tip2
+            
+
+
+    priorityTip = True # NEVER DOING THIS BLOCK. Keeping the code as future option
+    if priorityTip is False:
+      # Check tip and shaft connection
+      connected = False
+      if (shaft_label is not None) and (tip_label is not None):
+          connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # S1T1
+          if (connected is False):
+            if (tip_label2 is not None): #Tip1 not connected to shaft1 - Check Tip2
+              sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)         
+              connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #S1T2
+              if connected is True: #Change selection to tip2
+                tip_label = tip_label2
+                tip_center = tip_center2
+                tip_size = tip_size2
+                sitk_selected_tip = sitk_selected_tip2
+              elif (shaft_label2 is not None): #Tip2 not connected to shaft1 - Check shaft2
+                sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
+                connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
+                if (connected is True): #Change selection to shaft2
+                  shaft_label = shaft_label2
+                  shaft_size = shaft_size2
+                  sitk_selected_shaft = sitk_selected_shaft2
+                elif (tip_label2 is not None): #Tip1 not connected to shaft2 - Check Tip2
+                  connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft2) #S2T2
+                  if (connected is True): #Change selection to tip2 and shaft2
+                    tip_label = tip_label2
+                    tip_center = tip_center2
+                    tip_size = tip_size2
+                    sitk_selected_tip = sitk_selected_tip2
+                    shaft_label = shaft_label2
+                    shaft_size = shaft_size2
+                    sitk_selected_shaft = sitk_selected_shaft2                
+            elif (shaft_label2 is not None): #Tip1 not connected to shaft1 and NO Tip2 - Check shaft2
               sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
               connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
               if (connected is True): #Change selection to shaft2
                 shaft_label = shaft_label2
                 shaft_size = shaft_size2
-                sitk_selected_shaft = sitk_selected_shaft2
-              elif (tip_label2 is not None): #Tip1 not connected to shaft2 - Check Tip2
-                connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft2) #S2T2
-                if (connected is True): #Change selection to tip2 and shaft2
-                  tip_label = tip_label2
-                  tip_center = tip_center2
-                  tip_size = tip_size2
-                  sitk_selected_tip = sitk_selected_tip2
-                  shaft_label = shaft_label2
-                  shaft_size = shaft_size2
-                  sitk_selected_shaft = sitk_selected_shaft2                
-          elif (shaft_label2 is not None): #Tip1 not connected to shaft1 and NO Tip2 - Check shaft2
-            sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
-            connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
-            if (connected is True): #Change selection to shaft2
-              shaft_label = shaft_label2
-              shaft_size = shaft_size2
-              sitk_selected_shaft = sitk_selected_shaft2  
+                sitk_selected_shaft = sitk_selected_shaft2  
             
     #if logFlag:
     #  print('SELECTED: tip = %s, shaft = %s, connected = %s ' %(tip_label, shaft_label, connected))  
@@ -2831,6 +3013,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if not (self.prevDetection[0] is True or self.prevDetection[1] is True): # No tip in other planes
           trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position
         self.prevDetection[2] = True
+
+      # Smooth trackedTip (if enabled)
+      proposed = [trackTipMatrix.GetElement(0,3), trackTipMatrix.GetElement(1,3),trackTipMatrix.GetElement(2,3)]
+      proposed_sm = self.smoothTip(proposed) # Smooth (only when we are actually updating the tracked tip)
+      trackTipMatrix.SetElement(0,3, proposed_sm[0])
+      trackTipMatrix.SetElement(1,3, proposed_sm[1])
+      trackTipMatrix.SetElement(2,3, proposed_sm[2])
+
       # Set new tip value
       self.tipTrackedNode.SetMatrixTransformToParent(trackTipMatrix)
       self.setTipMarkupColor(tipTracked=True)
