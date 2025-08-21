@@ -1223,29 +1223,34 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     scanPlaneDefined = True if (self.usePlane0CheckBox.checked or self.usePlane1CheckBox.checked or self.usePlane2CheckBox.checked) else False
     modelDefined = False if (self.modelFileSelector.currentText == '') else True
 
+    # Enable smoothing controls only if tracking is OFF
+    self.smoothTipCheckBox.enabled = not self.isTrackingOn
+    self.smoothingMethodCombo.enabled = not self.isTrackingOn
+    self.emaAlphaSlider.enabled = not self.isTrackingOn
+    self.kfProcessNoiseSlider.enabled = not self.isTrackingOn
+    self.kfMeasNoiseSlider.enabled = not self.isTrackingOn
+
+    self.inputModeMagPhase.enabled = not self.isTrackingOn
+    self.inputModeRealImag.enabled = not self.isTrackingOn
+    self.inputVolume2D.enabled = not self.isTrackingOn
+    self.inputVolume3D.enabled = not self.isTrackingOn
+    self.inputChannels1.enabled = not self.isTrackingOn
+    self.inputChannels2.enabled = not self.isTrackingOn
+    self.inputChannels3.enabled = not self.isTrackingOn
+    self.modelFileSelector.enabled = not self.isTrackingOn
+    self.scannerModeMagPhase.enabled = not self.isTrackingOn
+    self.scannerModeRealImag.enabled = not self.isTrackingOn
+    self.usePlane0CheckBox.enabled = not self.isTrackingOn
+    self.usePlane1CheckBox.enabled = not self.isTrackingOn
+    self.usePlane2CheckBox.enabled = not self.isTrackingOn
+    self.pushTipToRobotCheckBox.enabled = not self.isTrackingOn
+    self.confidenceComboBox.enabled = not self.isTrackingOn
+    self.windowSizeWidget.setEnabled(not self.isTrackingOn)
+    self.minTipSizeWidget.setEnabled(not self.isTrackingOn)
+    self.minShaftSizeWidget.setEnabled(not self.isTrackingOn)
+    
     # Not tracking = ENABLE SELECTION
     if not self.isTrackingOn:
-      # Logic for required variables selection: 
-      self.inputModeMagPhase.enabled = True
-      self.inputModeRealImag.enabled = True
-      self.inputVolume2D.enabled = True
-      self.inputVolume3D.enabled = True
-      self.inputChannels1.enabled = True
-      self.inputChannels2.enabled = True
-      self.inputChannels3.enabled = True
-      self.modelFileSelector.enabled = True
-      self.scannerModeMagPhase.enabled = True
-      self.scannerModeRealImag.enabled = True
-      self.usePlane0CheckBox.enabled = True
-      self.usePlane1CheckBox.enabled = True
-      self.usePlane2CheckBox.enabled = True
-      self.pushTipToRobotCheckBox.enabled = True
-      #self.pushTargetToRobotCheckBox.enabled = True
-      self.confidenceComboBox.enabled = True
-      self.windowSizeWidget.setEnabled(True)
-      self.minTipSizeWidget.setEnabled(True)
-      self.minShaftSizeWidget.setEnabled(True)
-
       # Logic for optional variables selection
       # 1) Connection to Scanner
       if scanPlaneDefined:
@@ -1420,7 +1425,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.segmentationMaskPlane2Selector.enabled = False
         self.sendPlane2Button.enabled = False
 
-      # 2) Push target and tip (required for both)
+      # 3) Push tip
       if self.pushTipToRobotCheckBox.checked: # or self.pushTargetToRobotCheckBox.checked:
         self.robotConnectionSelector.enabled = True
         #self.transformSelector.enabled = True
@@ -1428,20 +1433,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         #transformDefined = self.transformSelector.currentNode()
       else:
         self.robotConnectionSelector.enabled = False
-        #self.transformSelector.enabled = False
-      # 3) Push target only
-      '''
-      if self.pushTargetToRobotCheckBox.checked:
-        self.targetSelector.enabled = True
-        targetDefined = self.targetSelector.currentNode()
-        if targetDefined and transformDefined:
-          self.sendTargetButton.enabled = True
-        else:
-          self.sendTargetButton.enabled = False
-      else:
-        self.targetSelector.enabled = False
-        self.sendTargetButton.enabled = False
-      '''
+
       # 3) Debug
       if self.debugFlagCheckBox.checked:
         self.debugNameTextbox.enabled = True
@@ -1455,17 +1447,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.phaseUnwrapCheckBox.enabled = False
     # When tracking = DISABLE SELECTION
     else:
-      #Setup
-      self.inputModeMagPhase.enabled = False
-      self.inputModeRealImag.enabled = False
-      self.inputVolume2D.enabled = False
-      self.inputVolume3D.enabled = False
-      self.inputChannels1.enabled = False
-      self.inputChannels2.enabled = False
-      self.inputChannels3.enabled = False
-      self.modelFileSelector.enabled = False
-      self.scannerModeMagPhase.enabled = False
-      self.scannerModeRealImag.enabled = False
       #Optional - MRI Scan Plane
       self.bridgeConnectionSelector.enabled = False
       self.usePlane0CheckBox.enabled = False
@@ -1502,11 +1483,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.centerAtTipCheckBox.enabled = False
       #Optional - Tip and Target
       self.pushTipToRobotCheckBox.enabled = False
-      #self.pushTargetToRobotCheckBox.enabled = False
       self.robotConnectionSelector.enabled = False
-      #self.transformSelector.enabled = False
-      #self.targetSelector.enabled = False
-      #self.sendTargetButton.enabled = False
       #Tracking
       self.confidenceComboBox.enabled = False
       self.firstVolumePlane0Selector.enabled = False
@@ -3014,20 +2991,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position
         self.prevDetection[2] = True
 
+
       # Smooth trackedTip (if enabled)
       proposed = [trackTipMatrix.GetElement(0,3), trackTipMatrix.GetElement(1,3),trackTipMatrix.GetElement(2,3)]
+      if logFlag:
+        print("Tracked tip (no smoothing) = [%.4f, %.4f, %.4f]" % tuple(proposed))
       proposed_sm = self.smoothTip(proposed) # Smooth (only when we are actually updating the tracked tip)
+      if logFlag:
+        print("Tracked tip = [%.4f, %.4f, %.4f]" % tuple(proposed_sm))
+
+      # Set new tip value
       trackTipMatrix.SetElement(0,3, proposed_sm[0])
       trackTipMatrix.SetElement(1,3, proposed_sm[1])
       trackTipMatrix.SetElement(2,3, proposed_sm[2])
-
-      # Set new tip value
       self.tipTrackedNode.SetMatrixTransformToParent(trackTipMatrix)
       self.setTipMarkupColor(tipTracked=True)
-      if logFlag:
-        tracked = [trackTipMatrix.GetElement(0,3), trackTipMatrix.GetElement(1,3), trackTipMatrix.GetElement(2,3)]
-        #print('Tracked tip = %s' %tracked)
-        print("Tracked tip = [%.4f, %.4f, %.4f]" % tuple(tracked))
     else:
       self.setTipMarkupColor(tipTracked=False)
       print('Tracked tip not updated (not enough confidence)')
