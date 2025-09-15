@@ -2008,14 +2008,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     displayNode = self.tipMarkupsNode.GetDisplayNode()
     if displayNode:
         displayNode.SetGlyphScale(1)  # 1% glyph size
-        displayNode.SetProjectionVisibility(True) # Enable projection visibility in 2D views
-        displayNode.SetProjectionOpacity(0.6)
+        #displayNode.SetProjectionOpacity(0.6)
     else:
         # If the display node does not exist, create it and set the glyph size
         self.tipMarkupsNode.CreateDefaultDisplayNodes()
         displayNode = self.tipMarkupsNode.GetDisplayNode()
         displayNode.SetGlyphScale(1)  # 1% glyph size
-        displayNode.SetProjectionVisibility(True) # Enable projection visibility in 2D views
         displayNode.SetProjectionOpacity(0.6)
     self.setTipMarkupColor()
     # Set the parent transform to self.tipTrackedNode
@@ -2616,20 +2614,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # plane = self.getDirectionName(sitk_img_m)
     #TODO: Check getDirectionName function
 
-    ######################################
-    ##                                  ##
-    ## Step 0b: Mask inputs             ##
-    ##                                  ##
-    ######################################
-
-    # Apply segmentation mask (optional)
-    if sitk_mask is not None:
-      sitk_img_m = sitk.Mask(sitk_img_m, sitk_mask)
-      if (in_channels!=1):
-        sitk_img_p = sitk.Mask(sitk_img_p, sitk_mask)
-      if in_channels == 3:
-        sitk_img_a = sitk.Mask(sitk_img_a, sitk_mask)
-
     # Push debug images to Slicer     
     if debugFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
@@ -2700,11 +2684,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if debugFlag:
       self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
 
+
     ######################################
     ##                                  ##
     ## Step 3: Separate tip elements    ##
     ##                                  ##
     ######################################    
+
+    # Apply mask to output (optional)
+    if sitk_mask is not None:
+      sitk_output = sitk.Mask(sitk_output, sitk_mask)
 
     # Separate labels
     sitk_tip = (sitk_output==2)
@@ -2763,7 +2752,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       sitk_selected_shaft = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label, upperThreshold=shaft_label, insideValue=1, outsideValue=0)
       # Is 2nd largest a candidate?
       if len(shaft_dict)>1:
-        print('2 shafts')
         shaft_size2 = shaft_dict[1]['size']
         if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
@@ -2790,7 +2778,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Check tip and shaft connection
     connected = False
-    if (shaft_label is not None) and (tip_label is not None):
+    if (shaft_label is not None) and (tip_label is not None): # Priority on bigger connected tip than bigger shaft
       connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # T1S1 - Go to next step (confidence)
       if (connected is False):
         if (shaft_label2 is not None): #Tip1 not connected to shaft1 - Check tip1 and shaft2
@@ -2828,8 +2816,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
             sitk_selected_tip = sitk_selected_tip2
             
 
-
-    priorityTip = True # NEVER DOING THIS BLOCK. Keeping the code as future option
+    priorityTip = True # NEVER DOING THIS BLOCK. Keeping the code as future option (priority on bigger connected shaft than bigger tip)
     if priorityTip is False:
       # Check tip and shaft connection
       connected = False
