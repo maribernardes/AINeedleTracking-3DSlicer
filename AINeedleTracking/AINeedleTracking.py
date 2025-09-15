@@ -1894,6 +1894,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         self.scanPlane2TransformNode.SetName('PLANE_2')
         slicer.mrmlScene.AddNode(self.scanPlane2TransformNode)
     self.initializeScanPlane(plane='AX')
+    # Check is colorTable node exists, if not, create a new one
+    self.colorTableNode = slicer.util.getFirstNodeByClassByName('vtkMRMLColorTableNode', 'NeedleColorMap')
+    if self.colorTableNode is None:
+      self.colorTableNode = self.createColorTable()
     # Check if needleLabelMap nodes exists, if not, create a new one
     self.needleLabelMapNodes = []
     for i in range(3):
@@ -1903,10 +1907,21 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         labelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
         labelMapNode.SetName(name)
         slicer.mrmlScene.AddNode(labelMapNode)
-        colorTableNode = self.createColorTable()
-        labelMapNode.CreateDefaultDisplayNodes()
-        labelMapNode.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+        # Create a display node without generating a per-node color table
+        displayNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeDisplayNode')
+        displayNode.SetAndObserveColorNodeID(self.colorTableNode.GetID())
+        labelMapNode.SetAndObserveDisplayNodeID(displayNode.GetID())
       self.needleLabelMapNodes.append(labelMapNode) 
+    # Check if TempMaskLabelMap and TempMaskDisplay is created
+    self.tempMaskLabelMapNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeNode','TempMaskLabelMap')
+    if self.tempMaskLabelMapNode is None:
+      self.tempMaskLabelMapNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'TempMaskLabelMap')
+      self.tempMaskLabelMapNode.HideFromEditorsOn()
+    self.tempMaskDisplay = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeDisplayNode','TempMaskDisplay')
+    if self.tempMaskDisplay is None:
+      self.tempMaskDisplay = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeDisplayNode', 'TempMaskDisplay')
+      self.tempMaskDisplay.SetAndObserveColorNodeID(self.colorTableNode.GetID())
+      self.tempMaskLabelMapNode.SetAndObserveDisplayNodeID(self.tempMaskDisplay.GetID())
     # Check if text node exists, if not, create a new one
     self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
     if self.needleConfidenceNode is None:
@@ -2033,17 +2048,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Create a ColorTable for the LabelMapNode
   # Lack of ColorTable was generating vtk error messages in the log for Slicer when running in my Mac
   def createColorTable(self):
-    colorTableName = 'NeedleColorMap'
-    # Check if the color table already exists
-    existingNode = slicer.util.getFirstNodeByClassByName("vtkMRMLColorTableNode", colorTableName)
-    if existingNode:
-        return existingNode
-    # If non existant, create a new one
     label_list = [("shaft", 1, 0.2, 0.5, 0.8), ('tip', 2, 1.0, 0.8, 0.7)]
     colorTableNode = slicer.mrmlScene.CreateNodeByClass("vtkMRMLColorTableNode")
     colorTableNode.SetHideFromEditors(True)
     colorTableNode.SetTypeToUser()
-    colorTableNode.SetName(colorTableName)
+    colorTableNode.SetName('NeedleColorMap')
     slicer.mrmlScene.AddNode(colorTableNode); 
     colorTableNode.HideFromEditorsOff()  # make the color table selectable in the GUI outside Colors module
     colorTableNode.UnRegister(None)
@@ -2079,8 +2088,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         volume_node = slicer.mrmlScene.AddNewNodeByClass(volume_type)
         volume_node.SetName(node_name)
         if volume_type == 'vtkMRMLLabelMapVolumeNode': # For LabelMap node, create ColorTable
-          colorTableNode = self.createColorTable()
-          volume_node.GetDisplayNode().SetAndObserveColorNodeID(colorTableNode.GetID())
+          volume_node.GetDisplayNode().SetAndObserveColorNodeID(self.colorTableNode.GetID())
     elif isinstance(node, slicer.vtkMRMLScalarVolumeNode) or isinstance(node, slicer.vtkMRMLLabelMapVolumeNode):
       node_name = node.GetName()
       volume_node = node
@@ -2089,11 +2097,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       print('Error: variable labelmap is not valid (slicer.vtkMRMLScalarVolumeNode or slicer.vtkMRMLLabelMapVolumeNode or str)')
       return False
     sitkUtils.PushVolumeToSlicer(sitk_image, volume_node)
+    
     return True
 
   # Check if two binary images have pixels close to each other by a given distance (default = 3px)
   def checkIfAdjacent(self, sitk_tip, sitk_shaft, distance=3):
-    sitk_dilated_tip = sitk.BinaryDilate(sitk_tip, (distance, distance, distance))
+    if sitk_tip is not None:
+      sitk_dilated_tip = sitk.BinaryDilate(sitk_tip, (distance, distance, distance))
     intersection = sitk_dilated_tip & sitk_shaft
     intersection_stats = sitk.StatisticsImageFilter()
     intersection_stats.Execute(intersection)
@@ -2261,20 +2271,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   
   # Build a sitk mask volume from a segmentation node
   def getMaskFromSegmentation(self, segmentationNode, referenceVolumeNode):
-    if segmentationNode is not None and referenceVolumeNode is not None:
-      # Create a temporary labelmap node
-      maskLabelMapNode = slicer.vtkMRMLLabelMapVolumeNode()
-      slicer.mrmlScene.AddNode(maskLabelMapNode)
-      # Create mask from segmentation
-      slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, maskLabelMapNode, referenceVolumeNode)
-      sitk_mask = sitkUtils.PullVolumeFromSlicer(maskLabelMapNode)
-      sitk_mask = sitk.Cast(sitk_mask, sitk.sitkUInt8)
-      # Remove temporary labelmap node
-      slicer.mrmlScene.RemoveNode(maskLabelMapNode)
-      return sitk_mask
-    else:
-      return None
-  
+    if not segmentationNode or not referenceVolumeNode:
+        return None
+    # Export into the persistent hidden node
+    slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segmentationNode, self.tempMaskLabelMapNode, referenceVolumeNode)
+    sitk_mask = sitkUtils.PullVolumeFromSlicer(self.tempMaskLabelMapNode)
+    return sitk.Cast(sitk_mask, sitk.sitkUInt8)
+
   def setupUNet(self, inputVolume, in_channels, model, out_channels=3):
     # Setup UNet model
     model_unet = UNet(
@@ -2593,8 +2596,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Get sitk images from MRML volume nodes 
     if (imageConversion == 'RealImag'): # Convert to magnitude/phase
       (sitk_img_m, sitk_img_p) = self.magPhaseToRealImag(firstVolume, secondVolume)
+      name_vol1 = 'debug_img_r'
+      name_vol2 = 'debug_img_i'
     elif (imageConversion == 'MagPhase'):
       (sitk_img_m, sitk_img_p) = self.realImagToMagPhase(firstVolume, secondVolume)
+      name_vol1 = 'debug_img_m'
+      name_vol2 = 'debug_img_p'
     else:                         # Conversion is None
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       if (in_channels!=1):
@@ -2616,11 +2623,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Push debug images to Slicer     
     if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_img_m, 'debug_img_m')
-      self.saveSitkImage(sitk_img_m, name='debug_img_m_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+      self.pushSitkToSlicerVolume(sitk_img_m, name_vol1)
+      self.saveSitkImage(sitk_img_m, name=name_vol1+'_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
       if (in_channels!=1):
-        self.pushSitkToSlicerVolume(sitk_img_p, 'debug_img_p')
-        self.saveSitkImage(sitk_img_p, name='debug_img_p_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+        self.pushSitkToSlicerVolume(sitk_img_p, name_vol2)
+        self.saveSitkImage(sitk_img_p, name=name_vol2+'_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
       if in_channels == 3:
         self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
         self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
@@ -2690,6 +2697,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ## Step 3: Separate tip elements    ##
     ##                                  ##
     ######################################    
+
+    if debugFlag:
+      self.pushSitkToSlicerVolume(sitk_output, 'debug_output')
+      self.saveSitkImage(sitk_output, name='debug_output_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
 
     # Apply mask to output (optional)
     if sitk_mask is not None:
