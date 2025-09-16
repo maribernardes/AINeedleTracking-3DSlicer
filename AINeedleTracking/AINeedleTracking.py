@@ -1818,7 +1818,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self.logic.pushScanPlaneToIGTLink(self.mrigtlBridgeServerNode, plane='SAG')
           else:
             print('Scan plane NOT updated - No confidence on needle tracking')
-            self.tracker.mark('plan_updated') # Consider the scan "update" is to keep current position
+          self.tracker.mark('plan_updated')
 
         if self.pushTipToRobot is True:
           self.logic.pushTipToIGTLink(self.robotIGTLClientNode)
@@ -1920,7 +1920,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tempMaskDisplay = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeDisplayNode','TempMaskDisplay')
     if self.tempMaskDisplay is None:
       self.tempMaskDisplay = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeDisplayNode', 'TempMaskDisplay')
-      self.tempMaskDisplay.SetAndObserveColorNodeID(self.colorTableNode.GetID())
+      #self.tempMaskDisplay.SetAndObserveColorNodeID(self.colorTableNode.GetID())
       self.tempMaskLabelMapNode.SetAndObserveDisplayNodeID(self.tempMaskDisplay.GetID())
     # Check if text node exists, if not, create a new one
     self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
@@ -2471,17 +2471,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if plane=='COR':    # PLAN_0
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane0TransformNode)
       connectionNode.PushNode(self.scanPlane0TransformNode)
-      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane0TransformNode)
     elif plane=='SAG':  # PLAN_1
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane1TransformNode)
       connectionNode.PushNode(self.scanPlane1TransformNode)
-      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane1TransformNode)
     if plane=='AX':     # PLAN_2
       connectionNode.RegisterOutgoingMRMLNode(self.scanPlane2TransformNode)
       connectionNode.PushNode(self.scanPlane2TransformNode)
-      self.tracker.mark('plan_updated')
       connectionNode.UnregisterOutgoingMRMLNode(self.scanPlane2TransformNode)
 
   def pushTipToIGTLink(self, connectionNode):
