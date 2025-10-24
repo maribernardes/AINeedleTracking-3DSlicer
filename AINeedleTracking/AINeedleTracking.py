@@ -175,36 +175,32 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     #### Model configuration ####
     sectionModel = SeparatorWidget('Model Selection')
     setupFormLayout.addRow(sectionModel)    
-    inputHBoxLayout1 = qt.QHBoxLayout()
+    inputHBoxLayout = qt.QHBoxLayout()
     hSpacer = qt.QSpacerItem(20, 20, qt.QSizePolicy.Fixed, qt.QSizePolicy.Minimum)
 
-    inputHBoxLayout1.addWidget(qt.QLabel('Mode:'))
+    inputHBoxLayout.addWidget(qt.QLabel('Mode:'))
     self.inputModeMagPhase = qt.QRadioButton('Mag/Phase')
     self.inputModeRealImag = qt.QRadioButton('Real/Imag')
     self.inputModeMagPhase.checked = 1
     self.inputModeButtonGroup = qt.QButtonGroup()
     self.inputModeButtonGroup.addButton(self.inputModeMagPhase)
     self.inputModeButtonGroup.addButton(self.inputModeRealImag)    
-    inputHBoxLayout1.addWidget(self.inputModeMagPhase)
-    inputHBoxLayout1.addWidget(self.inputModeRealImag)
-    # inputHBoxLayout1.addItem(hSpacer)
-    inputHBoxLayout1.addStretch(1)
+    inputHBoxLayout.addWidget(self.inputModeMagPhase)
+    inputHBoxLayout.addWidget(self.inputModeRealImag)
+    inputHBoxLayout.addStretch(1)
 
-    inputHBoxLayout1.addWidget(qt.QLabel('Volume:'))
+    inputHBoxLayout.addWidget(qt.QLabel('Volume:'))
     self.inputVolume2D = qt.QRadioButton('2D (single slice)')
     self.inputVolume3D = qt.QRadioButton('3D (stack)')
     self.inputVolume2D.checked = 1
     self.inputVolumeButtonGroup = qt.QButtonGroup()
     self.inputVolumeButtonGroup.addButton(self.inputVolume2D)
     self.inputVolumeButtonGroup.addButton(self.inputVolume3D)
-    inputHBoxLayout1.addWidget(self.inputVolume2D)
-    inputHBoxLayout1.addWidget(self.inputVolume3D)
-    # inputHBoxLayout1.addItem(hSpacer)
-    inputHBoxLayout1.addStretch(1)
-    # setupFormLayout.addRow(inputHBoxLayout1)
+    inputHBoxLayout.addWidget(self.inputVolume2D)
+    inputHBoxLayout.addWidget(self.inputVolume3D)
+    inputHBoxLayout.addStretch(1)
 
-    # inputHBoxLayout2 = qt.QHBoxLayout()
-    inputHBoxLayout1.addWidget(qt.QLabel('Channels:'))
+    inputHBoxLayout.addWidget(qt.QLabel('Channels:'))
     self.inputChannels1 = qt.QRadioButton('1 CH')
     self.inputChannels2 = qt.QRadioButton('2 CH')
     self.inputChannels3 = qt.QRadioButton('3 CH')
@@ -213,12 +209,35 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannelsButtonGroup.addButton(self.inputChannels1)
     self.inputChannelsButtonGroup.addButton(self.inputChannels2)
     self.inputChannelsButtonGroup.addButton(self.inputChannels3)
-    inputHBoxLayout1.addWidget(self.inputChannels1)
-    inputHBoxLayout1.addWidget(self.inputChannels2)
-    inputHBoxLayout1.addWidget(self.inputChannels3)
-    # inputHBoxLayout1.addStretch(1)
-    setupFormLayout.addRow(inputHBoxLayout1)
-    
+    inputHBoxLayout.addWidget(self.inputChannels1)
+    inputHBoxLayout.addWidget(self.inputChannels2)
+    inputHBoxLayout.addWidget(self.inputChannels3)
+    setupFormLayout.addRow(inputHBoxLayout)
+
+    modelHBoxLayout = qt.QHBoxLayout()
+    modelHBoxLayout.addWidget(qt.QLabel('Residual units:'))
+    self.resUnits2 = qt.QRadioButton('2')
+    self.resUnits3 = qt.QRadioButton('3')
+    self.resUnits2.checked = 1
+    self.lastStrideButtonGroup = qt.QButtonGroup()
+    self.lastStrideButtonGroup.addButton(self.resUnits2)
+    self.lastStrideButtonGroup.addButton(self.resUnits3)    
+    modelHBoxLayout.addWidget(self.resUnits2)
+    modelHBoxLayout.addWidget(self.resUnits3)
+    modelHBoxLayout.addStretch(1)
+
+    modelHBoxLayout.addWidget(qt.QLabel('Last stride:'))
+    self.lastStride1 = qt.QRadioButton('1')
+    self.lastStride2 = qt.QRadioButton('2')
+    self.lastStride1.checked = 1
+    self.lastStrideButtonGroup = qt.QButtonGroup()
+    self.lastStrideButtonGroup.addButton(self.lastStride1)
+    self.lastStrideButtonGroup.addButton(self.lastStride2)    
+    modelHBoxLayout.addWidget(self.lastStride1)
+    modelHBoxLayout.addWidget(self.lastStride2)
+
+    setupFormLayout.addRow(modelHBoxLayout)
+
     self.modelFileSelector = qt.QComboBox()
     self.updateModelList()
     setupFormLayout.addRow('AI Model:',self.modelFileSelector)
@@ -847,7 +866,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.windowSizeWidget = ctk.ctkSliderWidget()
     self.windowSizeWidget.singleStep = 4
     self.windowSizeWidget.minimum = 32
-    self.windowSizeWidget.maximum = 84
+    self.windowSizeWidget.maximum = 192
     self.windowSizeWidget.value = 84
     self.windowSizeWidget.setToolTip("Set window size (px) for the sliding window")
     advancedFormLayout.addRow("Sliding window size ", self.windowSizeWidget)
@@ -892,6 +911,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels1.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputChannels2.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.inputChannels3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+
+    self.resUnits2.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.resUnits3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.lastStride1.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.lastStride2.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+
     self.modelFileSelector.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
 
     self.scannerModeMagPhase.connect("toggled(bool)", self.updateParameterNodeFromGUI)
@@ -938,6 +963,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels1.connect("toggled(bool)", self.updateModelList)    
     self.inputChannels2.connect("toggled(bool)", self.updateModelList)
     self.inputChannels3.connect("toggled(bool)", self.updateModelList)
+
+    self.resUnits2.connect("toggled(bool)", self.updateModelList)    
+    self.resUnits3.connect("toggled(bool)", self.updateModelList)
+    self.lastStride1.connect("toggled(bool)", self.updateModelList)    
+    self.lastStride2.connect("toggled(bool)", self.updateModelList)
 
     self.usePlane0CheckBox.connect("toggled(bool)", self.updateButtons)
     self.usePlane1CheckBox.connect("toggled(bool)", self.updateButtons)
@@ -1091,6 +1121,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels1.checked = (self._parameterNode.GetParameter('InputChannels') == '1CH')
     self.inputChannels2.checked = (self._parameterNode.GetParameter('InputChannels') == '2CH')
     self.inputChannels3.checked = (self._parameterNode.GetParameter('InputChannels') == '3CH')
+
+    self.resUnits2.checked = (self._parameterNode.GetParameter('ResUnits') == '2')
+    self.resUnits3.checked = (self._parameterNode.GetParameter('ResUnits') == '3')
+    self.lastStride1.checked = (self._parameterNode.GetParameter('LastStride') == '1')
+    self.lastStride2.checked = (self._parameterNode.GetParameter('LastStride') == '2')
+
     self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
 
     self.scannerModeMagPhase.checked = (self._parameterNode.GetParameter('ScannerMode') == 'MagPhase')
@@ -1148,6 +1184,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('InputMode', 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag')
     self._parameterNode.SetParameter('InputVolume', '2D' if self.inputVolume2D.checked else '3D')
     self._parameterNode.SetParameter('InputChannels', '1CH' if self.inputChannels1.checked else '2CH' if self.inputChannels2.checked else '3CH')
+    
+    self._parameterNode.SetParameter('ResUnits', '2' if self.resUnits2.checked else '3')
+    self._parameterNode.SetParameter('LastStride', '1' if self.lastStride1.checked else '2')
+
     self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex))
 
     self._parameterNode.SetParameter('ScannerMode', 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag')
@@ -1237,6 +1277,12 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels1.enabled = not self.isTrackingOn
     self.inputChannels2.enabled = not self.isTrackingOn
     self.inputChannels3.enabled = not self.isTrackingOn
+
+    self.resUnits2.enabled = not self.isTrackingOn
+    self.resUnits3.enabled = not self.isTrackingOn
+    self.lastStride1.enabled = not self.isTrackingOn
+    self.lastStride2.enabled = not self.isTrackingOn
+
     self.modelFileSelector.enabled = not self.isTrackingOn
     self.scannerModeMagPhase.enabled = not self.isTrackingOn
     self.scannerModeRealImag.enabled = not self.isTrackingOn
@@ -1527,7 +1573,16 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       volume = '2'
     else:
       volume = '3'
-    listPath = os.path.join(self.path, 'Models', inputMode, volume+'D-'+channels+'CH')
+    if self.resUnits3.checked:
+      resUnits = '3'
+    else:
+      resUnits = '2'
+    if self.lastStride2.checked:
+      lastStride = '2'
+    else:
+      lastStride = '1'
+
+    listPath = os.path.join(self.path, 'Models', inputMode, volume+'D-'+channels+'CH','Conv'+resUnits, 'S'+lastStride)
     # Check if the folder exists
     if os.path.exists(listPath) and os.path.isdir(listPath):
         # Get the list of files
@@ -1588,6 +1643,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
     self.inputVolume = 2 if self.inputVolume2D.checked else 3
     self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
+    self.resUnits = 2 if self.resUnits2.checked else 3 
+    self.lastStride = 1 if self.lastStride1.checked else 2 
     self.model = self.modelFileSelector.currentText
 
     self.scannerMode = 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag'
@@ -1597,10 +1654,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.centerScanAtTip = self.centerAtTipCheckBox.checked 
     self.confidenceLevel = (self.confidenceComboBox.currentIndex + 1)
     confidenceText = self.logic.getConfidenceText(self.confidenceLevel)
-    print('inputMode = %s, inputVolume = %s, inputChannels = %s, model = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.model))
-    print('Tracking with confidence = %s' %confidenceText)
-    print('____________________')
-
     self.mrigtlBridgeServerNode = self.bridgeConnectionSelector.currentNode()
 
     self.firstVolumePlane0 = self.firstVolumePlane0Selector.currentNode()
@@ -1628,6 +1681,21 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.minTipSize = int(self.minTipSizeWidget.value)
     self.minShaftSize = int(self.minShaftSizeWidget.value)
 
+    print('Model = %s' %(self.model))
+    print('inMode = %s, inVolume = %s, inChannels = %s, resUnits = %s, lastStride = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride))
+    print('Tracking with confidence = %s' %confidenceText)
+    print('windowSize = %s, minTipSize = %s, minShaft = %s' %(self.windowSize, self.minTipSize, self.minShaftSize))
+    if self.logic.smoothingEnabled:
+      if self.logic.smoothingMethod=='EMA':
+        smoothingInfo = 'alpha = '+ str(self.logic.emaAlpha)
+      else:
+        smoothingInfo = 'q = '+ str(self.logic.kf_q) + '/ r = ' + str(self.logic.kf_r)
+      print('Smoothing = %s, %s' %(self.logic.smoothingMethod, smoothingInfo))
+    else:
+      print('No smoothing')
+    print('____________________')
+
+
     # Check if folder exists
     if self.debugFlag:
       path = os.path.dirname(os.path.abspath(__file__))
@@ -1646,7 +1714,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
-    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.model)
+    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.model)
     
     # Create listener to image sequence node (considering phase image comes after magnitude)
     if self.useScanPlanes[0] is True:
@@ -1920,7 +1988,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.tempMaskDisplay = slicer.util.getFirstNodeByClassByName('vtkMRMLLabelMapVolumeDisplayNode','TempMaskDisplay')
     if self.tempMaskDisplay is None:
       self.tempMaskDisplay = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeDisplayNode', 'TempMaskDisplay')
-      #self.tempMaskDisplay.SetAndObserveColorNodeID(self.colorTableNode.GetID())
       self.tempMaskLabelMapNode.SetAndObserveDisplayNodeID(self.tempMaskDisplay.GetID())
     # Check if text node exists, if not, create a new one
     self.needleConfidenceNode = slicer.util.getFirstNodeByClassByName('vtkMRMLTextNode','CurrentTipConfidence')
@@ -1957,6 +2024,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('InputVolume', '2D')               
     if not parameterNode.GetParameter('InputChannels'):
       parameterNode.SetParameter('InputChannels', '2CH')               
+
+    if not parameterNode.GetParameter('ResUnits'):
+      parameterNode.SetParameter('ResUnits', '2')     
+    if not parameterNode.GetParameter('LastStride'):
+      parameterNode.SetParameter('LastStride', '1')     
+
     if not parameterNode.GetParameter('Model'): 
       parameterNode.SetParameter('Model', '0')    # Index of selected option
 
@@ -2278,23 +2351,52 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_mask = sitkUtils.PullVolumeFromSlicer(self.tempMaskLabelMapNode)
     return sitk.Cast(sitk_mask, sitk.sitkUInt8)
 
-  def setupUNet(self, inputVolume, in_channels, model, out_channels=3):
+  def setupUNet(self, inputVolume, in_channels, resUnits, lastStride, model, out_channels=3):
+
     # Setup UNet model
     model_unet = UNet(
       spatial_dims=3,
       in_channels=in_channels,
       out_channels=out_channels,
       channels=[16, 32, 64, 128], 
-      strides=[(1, 2, 2), (1, 2, 2), (1, 1, 1)], 
-      num_res_units=2,
-      norm=Norm.BATCH,
+      strides=[(1, 2, 2), (1, 2, 2), (1, lastStride, lastStride)], 
+      num_res_units=resUnits,
+      # Enable affine so N.weight/N.bias exist and can load
+      norm=(Norm.INSTANCE, {"affine": True, "track_running_stats": False}),
+      #norm=(Norm.GROUP, {'num_groups': 1, 'affine': True})
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     self.model = model_unet.to(device)
-    self.model.load_state_dict(torch.load(model, weights_only=True, map_location=device))
+  
+
+    ckpt = torch.load(model, map_location=device)
+    state = ckpt.get("state_dict", ckpt)
+
+    def strip_common_prefix(k: str):
+        for p in ("module.", "net.", "unet."):
+            if k.startswith(p):
+                return k[len(p):]
+        return k
+
+    new_state = {}
+    for k, v in state.items():
+        k2 = strip_common_prefix(k)
+        if not k2.startswith("model."):
+            k2 = "model." + k2
+        # Drop BN buffers; they don't exist for IN
+        if any(buf in k2 for buf in ("running_mean", "running_var", "num_batches_tracked")):
+            continue
+        new_state[k2] = v
+
+    missing, unexpected = self.model.load_state_dict(new_state, strict=False)
+    print("Missing keys:", missing)
+    print("Unexpected keys:", unexpected)    
+    #self.model.load_state_dict(torch.load(model, weights_only=True, map_location=device))
+
     ## Setup transforms
     if inputVolume == '2':
-      pixel_dim = (6, 1.171875, 1.171875)
+      pixel_dim = (3.6, 1.171875, 1.171875)
+      #pixel_dim = (6, 1.171875, 1.171875)
     else:
       pixel_dim = (3.6, 1.171875, 1.171875)
     # Define pre-inference transforms
@@ -2356,9 +2458,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self._last_update_ts = None
 
   # Initialize AI model
-  def initializeModel(self, inputMode, inputVolume, in_channels, modelName):
-    modelFilePath = os.path.join(self.path, 'Models', inputMode, str(inputVolume)+'D-'+str(in_channels)+'CH', modelName)
-    self.setupUNet(inputVolume, in_channels, modelFilePath) # Setup UNet
+  def initializeModel(self, inputMode, inputVolume, in_channels, resUnits, lastStride, modelName):
+    modelFilePath = os.path.join(self.path,'Models',inputMode,str(inputVolume)+'D-'+str(in_channels)+'CH','Conv'+str(resUnits),'S'+str(lastStride),modelName)
+    self.setupUNet(inputVolume, in_channels, resUnits, lastStride, modelFilePath) # Setup UNet
 
   # Initialize masks
   def initializeMasks(self, segmentationNodePlane0, firstVolumePlane0, segmentationNodePlane1, firstVolumePlane1, segmentationNodePlane2, firstVolumePlane2):
