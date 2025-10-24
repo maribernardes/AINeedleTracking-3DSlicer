@@ -3,6 +3,8 @@
 
 
 import logging
+import json, uuid, platform
+
 import os
 import time
 import copy
@@ -25,7 +27,7 @@ from monai.transforms import Invertd, Activationsd, AsDiscreted, KeepLargestConn
 from monai.networks.nets import UNet 
 from monai.networks.layers import Norm
 from monai.inferers import sliding_window_inference
-from monai.data import decollate_batch
+from monai.data import decollate_batch, MetaTensor
 from monai.handlers.utils import from_engine
 from skimage.restoration import unwrap_phase
 
@@ -103,6 +105,83 @@ class TimestampTracker:
           print(f"{s1} → {s2}: mean = {mean_val:.2f} ms | std = {std_val:.2f} ms")
         else:
           print(f"{s1} → {s2}: no data")
+
+
+################################################################################################################################################
+# CSV file logging (imageNumber, PlaneName, confidenceLevel, RAS triplets...)
+################################################################################################################################################
+from dataclasses import dataclass, asdict
+import csv
+
+VALID_PLANES = {"COR", "SAG", "AX"}
+VALID_CONFIDENCE = {"High", "Medium High", "Medium", "Medium Low", "Low", "None"}
+
+def _xyz3(v):
+  if v is None:
+    return (float('nan'), float('nan'), float('nan'))
+  x, y, z = v
+  return float(x), float(y), float(z)
+
+@dataclass
+class ScanRecord:
+  imageNumber: int
+  PlaneName: str
+  confidenceLevel: str
+  segmentedTip_RAS_x: float
+  segmentedTip_RAS_y: float
+  segmentedTip_RAS_z: float
+  trackedTipPreSmooth_RAS_x: float
+  trackedTipPreSmooth_RAS_y: float
+  trackedTipPreSmooth_RAS_z: float
+  trackedTipPostSmooth_RAS_x: float
+  trackedTipPostSmooth_RAS_y: float
+  trackedTipPostSmooth_RAS_z: float
+
+  @staticmethod
+  def from_values(image_number, plane_name, confidence_text,
+                  segm_tip_ras, tracked_pre_ras, tracked_post_ras):
+    plane_name = str(plane_name)
+    if plane_name not in VALID_PLANES:
+      raise ValueError(f"PlaneName must be one of {sorted(VALID_PLANES)}")
+    if confidence_text not in VALID_CONFIDENCE:
+      raise ValueError(f"confidenceLevel must be one of {sorted(VALID_CONFIDENCE)}")
+    sx, sy, sz = _xyz3(segm_tip_ras)
+    px, py, pz = _xyz3(tracked_pre_ras)
+    qx, qy, qz = _xyz3(tracked_post_ras)
+    return ScanRecord(
+      imageNumber=int(image_number),
+      PlaneName=plane_name,
+      confidenceLevel=confidence_text,
+      segmentedTip_RAS_x=sx, segmentedTip_RAS_y=sy, segmentedTip_RAS_z=sz,
+      trackedTipPreSmooth_RAS_x=px, trackedTipPreSmooth_RAS_y=py, trackedTipPreSmooth_RAS_z=pz,
+      trackedTipPostSmooth_RAS_x=qx, trackedTipPostSmooth_RAS_y=qy, trackedTipPostSmooth_RAS_z=qz,
+    )
+
+class ScanCSVLogger:
+  HEADER = [
+    "imageNumber","PlaneName","confidenceLevel",
+    "segmentedTip_RAS_x","segmentedTip_RAS_y","segmentedTip_RAS_z",
+    "trackedTipPreSmooth_RAS_x","trackedTipPreSmooth_RAS_y","trackedTipPreSmooth_RAS_z",
+    "trackedTipPostSmooth_RAS_x","trackedTipPostSmooth_RAS_y","trackedTipPostSmooth_RAS_z",
+  ]
+  def __init__(self, csv_path: str, append: bool=False):
+    self.csv_path = csv_path
+    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+    file_exists = os.path.isfile(csv_path)
+    mode = "a" if append else "w"
+    self._f = open(csv_path, mode, newline="", encoding="utf-8")
+    self._w = csv.DictWriter(self._f, fieldnames=self.HEADER)
+    if not append or not file_exists:
+      self._w.writeheader(); self._f.flush()
+  def log(self, rec: ScanRecord):
+    self._w.writerow(asdict(rec)); self._f.flush()
+  def close(self):
+    try:
+      self._f.close()
+    except Exception:
+      pass
+
+
 
 ################################################################################################################################################
 # Custom Widget  - Separator
@@ -190,8 +269,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputHBoxLayout.addStretch(1)
 
     inputHBoxLayout.addWidget(qt.QLabel('Volume:'))
-    self.inputVolume2D = qt.QRadioButton('2D (single slice)')
-    self.inputVolume3D = qt.QRadioButton('3D (stack)')
+    self.inputVolume2D = qt.QRadioButton('2D')
+    self.inputVolume3D = qt.QRadioButton('3D')
     self.inputVolume2D.checked = 1
     self.inputVolumeButtonGroup = qt.QButtonGroup()
     self.inputVolumeButtonGroup.addButton(self.inputVolume2D)
@@ -201,9 +280,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     inputHBoxLayout.addStretch(1)
 
     inputHBoxLayout.addWidget(qt.QLabel('Channels:'))
-    self.inputChannels1 = qt.QRadioButton('1 CH')
-    self.inputChannels2 = qt.QRadioButton('2 CH')
-    self.inputChannels3 = qt.QRadioButton('3 CH')
+    self.inputChannels1 = qt.QRadioButton('1CH')
+    self.inputChannels2 = qt.QRadioButton('2CH')
+    self.inputChannels3 = qt.QRadioButton('3CH')
     self.inputChannels2.checked = 1
     self.inputChannelsButtonGroup = qt.QButtonGroup()
     self.inputChannelsButtonGroup.addButton(self.inputChannels1)
@@ -767,47 +846,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.robotConnectionSelector.enabled = False
     optionalFormLayout.addRow('IGTLClient Robot:', self.robotConnectionSelector)
 
-    # Select zFrameToWorld transform
-    '''
-    self.transformSelector = slicer.qMRMLNodeComboBox()
-    self.transformSelector.nodeTypes = ['vtkMRMLLinearTransformNode']
-    self.transformSelector.selectNodeUponCreation = True
-    self.transformSelector.addEnabled = False
-    self.transformSelector.removeEnabled = False
-    self.transformSelector.noneEnabled = True
-    self.transformSelector.showHidden = False
-    self.transformSelector.showChildNodeTypes = False
-    self.transformSelector.setMRMLScene(slicer.mrmlScene)
-    self.transformSelector.setToolTip('Select ZFrame registration transform')
-    self.transformSelector.enabled = False
-    optionalFormLayout.addRow('ZFrame Transform:', self.transformSelector)
-    '''
-    # Select target and send with OpenIGTLink server
-    '''
-    targetHBoxLayout = qt.QHBoxLayout()
-    self.targetSelector = slicer.qMRMLNodeComboBox()
-    self.targetSelector.nodeTypes = ['vtkMRMLMarkupsFiducialNode']
-    self.targetSelector.selectNodeUponCreation = True
-    self.targetSelector.addEnabled = False
-    self.targetSelector.removeEnabled = False
-    self.targetSelector.noneEnabled = True
-    self.targetSelector.showHidden = False
-    self.targetSelector.showChildNodeTypes = False
-    self.targetSelector.setMRMLScene(slicer.mrmlScene)
-    self.targetSelector.setToolTip('Select target')
-    self.targetSelector.enabled = False
-    targetHBoxLayout.addWidget(qt.QLabel('Target Markups:'))
-    targetHBoxLayout.addWidget(self.targetSelector)
-    
-
-    self.sendTargetButton = qt.QPushButton('Push Target')
-    self.sendTargetButton.toolTip = 'Send target to robot'
-    self.sendTargetButton.setFixedWidth(170)
-    self.sendTargetButton.enabled = False
-    targetHBoxLayout.addWidget(self.sendTargetButton)
-
-    optionalFormLayout.addRow(targetHBoxLayout)
-    '''
     ## Advanced parameters            
     ####################################
 
@@ -829,22 +867,32 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     logHBoxLayout.addStretch()
     advancedFormLayout.addRow(logHBoxLayout)
         
-    # Debug mode check box (output images at intermediate steps)
+    # Save data (CSV) (independent of screen log and save images)
     saveHBoxLayout = qt.QHBoxLayout()   
-    debugLabel = qt.QLabel('Save images')
-    debugLabel.setFixedWidth(85)
-    self.debugFlagCheckBox = qt.QCheckBox()
-    self.debugFlagCheckBox.checked = False
-    self.debugFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
-    self.debugNameTextbox = qt.QLineEdit()
-    self.debugNameTextbox.setFixedWidth(250)
-    self.debugNameTextbox.setPlaceholderText('Include optional subfolder name')
-    self.debugNameTextbox.setReadOnly(False)
-    self.debugNameTextbox.enabled = False
-    saveHBoxLayout.addWidget(debugLabel)
-    saveHBoxLayout.addWidget(self.debugFlagCheckBox)
+    saveDataLabel = qt.QLabel('Save data')
+    saveDataLabel.setFixedWidth(85)
+    self.saveDataFlagCheckBox = qt.QCheckBox()
+    self.saveDataFlagCheckBox.checked = False
+    self.saveDataFlagCheckBox.setToolTip('If checked, silently save per-scan tracking data to a CSV file')
+    saveHBoxLayout.addWidget(saveDataLabel)
+    saveHBoxLayout.addWidget(self.saveDataFlagCheckBox)
+    saveHBoxLayout.addStretch()
+
+    # Save images at intermediate steps
+    saveImgLabel = qt.QLabel('Save images')
+    saveImgLabel.setFixedWidth(85)
+    self.saveImgFlagCheckBox = qt.QCheckBox()
+    self.saveImgFlagCheckBox.checked = False
+    self.saveImgFlagCheckBox.setToolTip('If checked, output images at intermediate steps')
+    self.saveNameTextbox = qt.QLineEdit()
+    self.saveNameTextbox.setFixedWidth(250)
+    self.saveNameTextbox.setPlaceholderText('Include optional subfolder name')
+    self.saveNameTextbox.setReadOnly(False)
+    self.saveNameTextbox.enabled = False
+    saveHBoxLayout.addWidget(saveImgLabel)
+    saveHBoxLayout.addWidget(self.saveImgFlagCheckBox)
     saveHBoxLayout.addItem(hSpacer)    
-    saveHBoxLayout.addWidget(self.debugNameTextbox)  
+    saveHBoxLayout.addWidget(self.saveNameTextbox)  
     saveHBoxLayout.addStretch()  
     advancedFormLayout.addRow(saveHBoxLayout)    
 
@@ -860,13 +908,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     preprocessingHBoxLayout.addStretch()  
     advancedFormLayout.addRow(preprocessingHBoxLayout)
 
-
-
     # Window size for sliding window
     self.windowSizeWidget = ctk.ctkSliderWidget()
     self.windowSizeWidget.singleStep = 4
     self.windowSizeWidget.minimum = 32
-    self.windowSizeWidget.maximum = 192
+    self.windowSizeWidget.maximum = 256
     self.windowSizeWidget.value = 84
     self.windowSizeWidget.setToolTip("Set window size (px) for the sliding window")
     advancedFormLayout.addRow("Sliding window size ", self.windowSizeWidget)
@@ -947,8 +993,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.robotConnectionSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.updateParameterNodeFromGUI)
     
     self.logFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.debugFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
-    self.debugNameTextbox.connect("textChanged", self.updateParameterNodeFromGUI)
+    self.saveDataFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.saveImgFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.saveNameTextbox.connect("textChanged", self.updateParameterNodeFromGUI)
     self.phaseUnwrapCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.windowSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minTipSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
@@ -1038,8 +1085,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.robotIGTLClientNode = None
     #self.zFrameTransform = None
 
-    self.debugFlag = None
-    self.debugName = None
+    self.saveImgFlag = None
+    self.saveName = None
     self.windowSize = None
     self.minTipSize = None
     self.minShaftSize = None
@@ -1162,8 +1209,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.robotConnectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('RobotIGTLClient'))
     
     self.logFlagCheckBox.checked = (self._parameterNode.GetParameter('ScreenLog') == 'True')
-    self.debugFlagCheckBox.checked = (self._parameterNode.GetParameter('Debug') == 'True')
-    self.debugNameTextbox.setText(self._parameterNode.GetParameter('DebugName'))
+    self.saveDataFlagCheckBox.checked = (self._parameterNode.GetParameter('SaveData') == 'True')
+    self.saveImgFlagCheckBox.checked = (self._parameterNode.GetParameter('SaveImg') == 'True')
+    self.saveNameTextbox.setText(self._parameterNode.GetParameter('SaveName'))
     self.phaseUnwrapCheckBox.checked = (self._parameterNode.GetParameter('PhaseUnwrap') == 'True')
     self.windowSizeWidget.value = float(self._parameterNode.GetParameter('WindowSize'))
     self.minTipSizeWidget.value = float(self._parameterNode.GetParameter('MinTipSize'))
@@ -1224,8 +1272,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetNodeReferenceID('RobotIGTLClient', self.robotConnectionSelector.currentNodeID)
 
     self._parameterNode.SetParameter('ScreenLog', 'True' if self.logFlagCheckBox.checked else 'False')
-    self._parameterNode.SetParameter('Debug', 'True' if self.debugFlagCheckBox.checked else 'False')
-    self._parameterNode.SetParameter('DebugName', self.debugNameTextbox.text.strip())    
+    self._parameterNode.SetParameter('SaveData', 'True' if self.saveDataFlagCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('SaveImg', 'True' if self.saveImgFlagCheckBox.checked else 'False')
+    self._parameterNode.SetParameter('SaveName', self.saveNameTextbox.text.strip())    
     self._parameterNode.SetParameter('PhaseUnwrap', 'True' if self.phaseUnwrapCheckBox.checked else 'False')
     self._parameterNode.SetParameter('WindowSize', str(self.windowSizeWidget.value))
     self._parameterNode.SetParameter('MinTipSize', str(self.minTipSizeWidget.value))
@@ -1481,11 +1530,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.robotConnectionSelector.enabled = False
 
       # 3) Debug
-      if self.debugFlagCheckBox.checked:
-        self.debugNameTextbox.enabled = True
-        # debugNameDefined = if self.debugNameTextbox.text.strip() 
+      if self.saveDataFlagCheckBox.checked or self.saveImgFlagCheckBox.checked:
+        self.saveNameTextbox.enabled = True
+        # saveNameDefined = if self.saveNameTextbox.text.strip() 
       else:
-        self.debugNameTextbox.enabled = False
+        self.saveNameTextbox.enabled = False
       # 4) Phase unwrap
       if self.inputModeMagPhase.checked:
         self.phaseUnwrapCheckBox.enabled = True
@@ -1645,7 +1694,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
     self.resUnits = 2 if self.resUnits2.checked else 3 
     self.lastStride = 1 if self.lastStride1.checked else 2 
-    self.model = self.modelFileSelector.currentText
+    self.modelName = self.modelFileSelector.currentText
 
     self.scannerMode = 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag'
     self.useScanPlanes = [self.usePlane0CheckBox.checked , self.usePlane1CheckBox.checked , self.usePlane2CheckBox.checked ]
@@ -1675,36 +1724,102 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.pushTipToRobot = self.pushTipToRobotCheckBox.checked 
     self.robotIGTLClientNode = self.robotConnectionSelector.currentNode()
 
-    self.debugFlag = self.debugFlagCheckBox.checked
-    self.debugName = self.debugNameTextbox.text.strip()
+    self.saveDataFlag = self.saveDataFlagCheckBox.checked
+    self.saveImgFlag = self.saveImgFlagCheckBox.checked
+    self.saveName = self.saveNameTextbox.text.strip()
     self.windowSize = int(self.windowSizeWidget.value)
     self.minTipSize = int(self.minTipSizeWidget.value)
     self.minShaftSize = int(self.minShaftSizeWidget.value)
 
-    print('Model = %s' %(self.model))
+    print('Model = %s' %(self.modelName))
     print('inMode = %s, inVolume = %s, inChannels = %s, resUnits = %s, lastStride = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride))
     print('Tracking with confidence = %s' %confidenceText)
     print('windowSize = %s, minTipSize = %s, minShaft = %s' %(self.windowSize, self.minTipSize, self.minShaftSize))
     if self.logic.smoothingEnabled:
-      if self.logic.smoothingMethod=='EMA':
+      smoothingMethod = self.logic.smoothingMethod
+      if smoothingMethod == 'EMA':
         smoothingInfo = 'alpha = '+ str(self.logic.emaAlpha)
       else:
         smoothingInfo = 'q = '+ str(self.logic.kf_q) + '/ r = ' + str(self.logic.kf_r)
       print('Smoothing = %s, %s' %(self.logic.smoothingMethod, smoothingInfo))
     else:
+      smoothingMethod = 'None'
+      smoothingInfo = 'None'
       print('No smoothing')
     print('____________________')
 
+    # Initialize CSV logger (silent) if saving data
 
-    # Check if folder exists
-    if self.debugFlag:
+    # Ensure output folder exists when saving images or data
+    if self.saveImgFlag or self.saveDataFlag:
       path = os.path.dirname(os.path.abspath(__file__))
-      folder_path = os.path.join(path, 'Debug', self.debugName)
+      folder_path = os.path.join(path, 'Log', self.saveName)
       if not os.path.exists(folder_path):
         os.makedirs(folder_path)
         print(f"Folder '{folder_path}' created.")
       else:
         print(f"Folder '{folder_path}' already exists.")
+    if self.saveImgFlag:
+      image_path = os.path.join(folder_path, 'Images')
+      if not os.path.exists(image_path):
+        os.makedirs(image_path)
+        print(f"Folder '{image_path}' created.")
+      else:
+        print(f"Folder '{image_path}' already exists.")
+
+    if self.saveDataFlag:
+      ts = time.strftime('%Y%m%d_%H%M%S')
+      csv_path = os.path.join(folder_path, f'session_id_{ts}.csv')
+      try:
+        self.logic.csv_logger = ScanCSVLogger(csv_path, append=False)
+      except Exception as e:
+        # keep silent for runtime; only warn in console
+        print(f'WARNING: could not create CSV logger: {e}')
+
+      # Collect GUI/parameter constants (adjust names if yours differ)
+      session_meta = {
+        #"session_id": self.logic.session_id,
+        "timestamp_start": ts,
+        "save_name": self.saveName,                # shared for images & data
+        "saving_images": bool(self.saveImgFlag),
+        "saving_data": bool(self.saveDataFlag),
+        "screen_log": bool(self.logFlagCheckBox.checked),
+        # UNet model
+        "model": self.modelName,
+        "inMode": self.inputMode,
+        "inVolume": self.inputVolume,
+        "inChannels": self.inputChannels,
+        "resUnits": self.resUnits,
+        "lastStride": self.lastStride,
+        # Tracking / algorithm settings
+        "window_size": self.windowSize,
+        "min_tip_size": self.minTipSize,
+        "confidence_threshold": self.confidenceLevel,   # numeric threshold used in getNeedle
+        "confidence_level": confidenceText,             # text descriptor
+        "smoothing": smoothingMethod,
+        "smoothing_params": smoothingInfo,
+        # Acquisition / planes (if you have them as booleans or a list)
+        "planes_enabled": {
+          "COR": bool(self.usePlane0CheckBox.checked),
+          "SAG": bool(self.usePlane1CheckBox.checked),
+          "AX":  bool(self.usePlane2CheckBox.checked),
+        },
+        # Environment (best-effort; all guarded)
+        "host": {
+          "platform": platform.system(),
+          "platform_release": platform.release(),
+        },
+        "slicer": {
+          "version": getattr(getattr(slicer, "app", None), "applicationVersion", None) if "slicer" in globals() else None,
+        },
+      }
+      # Persist JSON next to the CSV
+      self.logic.session_meta_path = os.path.join(folder_path, f"session_meta_{ts}.json")
+      try:
+        with open(self.logic.session_meta_path, "w", encoding="utf-8") as f:
+          json.dump(session_meta, f, indent=2)
+      except Exception as e:
+        print(f"WARNING: could not write session metadata: {e}")
 
     # Define image conversion
     if self.inputMode != self.scannerMode:
@@ -1714,7 +1829,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
-    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.model)
+    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.modelName)
     
     # Create listener to image sequence node (considering phase image comes after magnitude)
     if self.useScanPlanes[0] is True:
@@ -1750,6 +1865,28 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       ('tip_tracked', 'plan_updated')
     ])
     self.tracker.clear()
+
+    # Update session metadata on stop
+    try:
+      if getattr(self.logic, "session_meta_path", None):
+        # Read, update, and overwrite (robust if Slicer session is long-lived)
+        with open(self.logic.session_meta_path, "r", encoding="utf-8") as f:
+          session_meta = json.load(f)
+        session_meta["timestamp_end"] = time.strftime('%Y%m%d_%H%M%S')
+        session_meta["total_scans"] = int(getattr(self, "img_counter", 0))
+        with open(self.logic.session_meta_path, "w", encoding="utf-8") as f:
+          json.dump(session_meta, f, indent=2)
+    except Exception as e:
+      print(f"WARNING: could not finalize session metadata: {e}")
+
+    # Close CSV logger if open
+    try:
+      if self.logic.csv_logger:
+        self.logic.csv_logger.close()
+        self.logic.csv_logger = None
+    except Exception:
+      pass
+
     #TODO: Define what should to be refreshed
     print('UI: stopTracking()')
     if self.useScanPlanes[0] is True:
@@ -1854,7 +1991,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       logFlag = self.logFlagCheckBox.checked
       phaseUnwrap = self.phaseUnwrapCheckBox.checked
       # Get needle tip
-      confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, segMask, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, debugFlag=self.debugFlag, debugName=self.debugName) 
+      confidence = self.logic.getNeedle(plane, firstVolume, secondVolume, segMask, phaseUnwrap, self.imageConvertion, self.inputVolume, confidenceLevel=self.confidenceLevel, windowSize=self.windowSize, in_channels=self.inputChannels, minTip=self.minTipSize, minShaft=self.minShaftSize, logFlag=logFlag, saveDataFlag=self.saveDataFlag, saveImgFlag=self.saveImgFlag, saveName=self.saveName) 
       if confidence is None:
         print('Tracking failed')
         self.tracker.mark('plan_updated') # Consider the scan "update" is to keep current position
@@ -1904,12 +2041,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ScriptedLoadableModuleLogic.__init__(self)
     self.cliParamNode = None
 
-    # Timestamp
+    # Timestamp and logging
+    self.img_counter = 0
     self.tracker = None
+    self.csv_logger = None  
 
     # Image file writer
     self.path = os.path.dirname(os.path.abspath(__file__))
-    self.debug_path = os.path.join(self.path,'Debug')
+    self.save_path = os.path.join(self.path,'Log')
     self.fileWriter = sitk.ImageFileWriter()
     
     # Phase rescaling filter
@@ -1940,7 +2079,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self._kf_P = None  # 6x6 covariance
     self._last_update_ts = None  # seconds
 
-    
     # Check if PLANE_0 node exists, if not, create a new one
     self.scanPlane0TransformNode = slicer.util.getFirstNodeByClassByName('vtkMRMLLinearTransformNode', 'PLANE_0')
     if self.scanPlane0TransformNode is None:
@@ -2070,11 +2208,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if not parameterNode.GetParameter('PushTipToRobot'): 
       parameterNode.SetParameter('PushTipToRobot', 'False')  
     if not parameterNode.GetParameter('ScreenLog'):
-      parameterNode.SetParameter('ScreenLog', 'False')     
-    if not parameterNode.GetParameter('Debug'):
-      parameterNode.SetParameter('Debug', 'False') 
-    if not parameterNode.GetParameter('DebugName'): 
-      parameterNode.SetParameter('DebugName', '')
+      parameterNode.SetParameter('ScreenLog', 'False')  
+
+    if not parameterNode.GetParameter('SaveData'):
+      parameterNode.SetParameter('SaveData', 'True')     
+    if not parameterNode.GetParameter('SaveImg'):
+      parameterNode.SetParameter('SaveImg', 'False') 
+    if not parameterNode.GetParameter('SaveName'): 
+      parameterNode.SetParameter('SaveName', '')
     if not parameterNode.GetParameter('WindowSize'):
       parameterNode.SetParameter('WindowSize', '84') 
     if not parameterNode.GetParameter('MinTipSize'):
@@ -2351,9 +2492,26 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_mask = sitkUtils.PullVolumeFromSlicer(self.tempMaskLabelMapNode)
     return sitk.Cast(sitk_mask, sitk.sitkUInt8)
 
-  def setupUNet(self, inputVolume, in_channels, resUnits, lastStride, model, out_channels=3):
+  # Setup UNet model
+  def setupUNet(self, inputVolume, in_channels, resUnits, lastStride, model, out_channels=3, norm='BATCH'):
+    print('Loading UNet ')
+    if norm == 'INSTANCE':
+      # Enable affine so N.weight/N.bias exist and can load
+      print('Norm = INSTANCE')
+      unet_norm = (Norm.INSTANCE, {"affine": True, "track_running_stats": False})
+    elif norm=='GROUP':
+      print('Norm = GROUP')
+      unet_norm = (Norm.GROUP, {'num_groups': 1, 'affine': True})
+    else:
+      print('Norm = BATCH')
+      unet_norm = Norm.BATCH
 
-    # Setup UNet model
+    def strip_common_prefix(k: str):
+        for p in ("module.", "net.", "unet."):
+            if k.startswith(p):
+                return k[len(p):]
+        return k
+    
     model_unet = UNet(
       spatial_dims=3,
       in_channels=in_channels,
@@ -2361,37 +2519,27 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       channels=[16, 32, 64, 128], 
       strides=[(1, 2, 2), (1, 2, 2), (1, lastStride, lastStride)], 
       num_res_units=resUnits,
-      # Enable affine so N.weight/N.bias exist and can load
-      norm=(Norm.INSTANCE, {"affine": True, "track_running_stats": False}),
-      #norm=(Norm.GROUP, {'num_groups': 1, 'affine': True})
+      norm=unet_norm,
     )
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    self.model = model_unet.to(device)
-  
+    self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    self.model = model_unet.to(self.device)
 
-    ckpt = torch.load(model, map_location=device)
-    state = ckpt.get("state_dict", ckpt)
-
-    def strip_common_prefix(k: str):
-        for p in ("module.", "net.", "unet."):
-            if k.startswith(p):
-                return k[len(p):]
-        return k
-
-    new_state = {}
-    for k, v in state.items():
-        k2 = strip_common_prefix(k)
-        if not k2.startswith("model."):
-            k2 = "model." + k2
-        # Drop BN buffers; they don't exist for IN
-        if any(buf in k2 for buf in ("running_mean", "running_var", "num_batches_tracked")):
-            continue
-        new_state[k2] = v
-
+    checkpoint = torch.load(model, map_location=self.device)
+    state = checkpoint.get("state_dict", checkpoint)
+    if norm != 'BATCH': # Drop BN buffers; they don't exist for IN or GP
+      new_state = {}
+      for k, v in state.items():
+          k2 = strip_common_prefix(k)
+          if not k2.startswith("model."):
+              k2 = "model." + k2
+          if any(buf in k2 for buf in ("running_mean", "running_var", "num_batches_tracked")):
+              continue
+          new_state[k2] = v
+    else:
+      new_state = state
     missing, unexpected = self.model.load_state_dict(new_state, strict=False)
     print("Missing keys:", missing)
     print("Unexpected keys:", unexpected)    
-    #self.model.load_state_dict(torch.load(model, weights_only=True, map_location=device))
 
     ## Setup transforms
     if inputVolume == '2':
@@ -2438,12 +2586,16 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self.pre_transforms_ax = Compose(pre_array_ax)
     
     # Define post-inference transforms
-    self.post_transforms = Compose([ AsDiscreted(keys=['pred'], argmax=True, num_classes=3),
-                                     PushSitkImaged(keys=['pred'], resample=True, print_log=False)
+    self.post_transforms = Compose([ 
+                                      Activationsd(keys=["pred"], softmax=True),         # optional
+                                      AsDiscreted(keys=['pred'], argmax=True, num_classes=3),
+                                      PushSitkImaged(keys=['pred'], resample=True, print_log=False)
                                   ])  
 
   # Reset tracking values
   def initializeTracking(self, useScanPlanes):
+    # Reset data
+    self.img_counter = 0
     self.prevDetection = [False if plane else None for plane in useScanPlanes]
     # Reset tip transform nodes
     identityMatrix = vtk.vtkMatrix4x4()
@@ -2460,22 +2612,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # Initialize AI model
   def initializeModel(self, inputMode, inputVolume, in_channels, resUnits, lastStride, modelName):
     modelFilePath = os.path.join(self.path,'Models',inputMode,str(inputVolume)+'D-'+str(in_channels)+'CH','Conv'+str(resUnits),'S'+str(lastStride),modelName)
-    self.setupUNet(inputVolume, in_channels, resUnits, lastStride, modelFilePath) # Setup UNet
+    self.setupUNet(inputVolume, in_channels, resUnits, lastStride, modelFilePath, norm='INSTANCE') # Setup UNet
 
   # Initialize masks
   def initializeMasks(self, segmentationNodePlane0, firstVolumePlane0, segmentationNodePlane1, firstVolumePlane1, segmentationNodePlane2, firstVolumePlane2):
     self.sitk_mask0 = self.getMaskFromSegmentation(segmentationNodePlane0, firstVolumePlane0)    # Update mask (None if nothing in segmentationNode or firstVolume)
     self.sitk_mask1 = self.getMaskFromSegmentation(segmentationNodePlane1, firstVolumePlane1)    # Update mask (None if nothing in segmentationNode)
     self.sitk_mask2 = self.getMaskFromSegmentation(segmentationNodePlane2, firstVolumePlane2)    # Update mask (None if nothing in segmentationNode)
-
-  '''
-  def initializeZFrame(self, zFrameToWorld):
-    # Get world to ZFrame transformations
-    worldToZFrame = vtk.vtkMatrix4x4()
-    zFrameToWorld.GetMatrixTransformFromWorld(worldToZFrame)
-    # Set it to worldToZFrameNode
-    self.worldToZFrameNode.SetMatrixTransformToParent(worldToZFrame)
-  '''
 
   # Set Scan Plane Orientation
   # Default position is (0,0,0), unless center is specified 
@@ -2678,10 +2821,17 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
   # *****************************
 
 
-  def getNeedle(self, plane, firstVolume, secondVolume, segMask, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, debugFlag=False, debugName=''):    
-    # Increment tracking counter
-    image_count = len(self.tracker.timestamps['image_received'])
-    print('Image #%i' %(image_count))
+  def getNeedle(self, plane, firstVolume, secondVolume, segMask, phaseUnwrap, imageConversion, inputVolume, confidenceLevel=3, windowSize=84, in_channels=2, out_channels=3, minTip=10, minShaft=30, logFlag=False, saveDataFlag=False, saveImgFlag=False, saveName=''):    
+    # Increment image counter
+    self.img_counter += 1
+    print('Image #%i' %(self.img_counter))
+    image_path = os.path.join(self.path, 'Log', saveName, 'Images')
+
+    # --- CSV logging placeholders ---
+    _segm_ras_for_log = None
+    _pre_ras_for_log = None
+    _post_ras_for_log = None
+    _conf_text_for_log = 'None'
 
     ######################################
     ##                                  ##
@@ -2695,12 +2845,12 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Get sitk images from MRML volume nodes 
     if (imageConversion == 'RealImag'): # Convert to magnitude/phase
       (sitk_img_m, sitk_img_p) = self.magPhaseToRealImag(firstVolume, secondVolume)
-      name_vol1 = 'debug_img_r'
-      name_vol2 = 'debug_img_i'
+      name_vol1 = 'img_r'
+      name_vol2 = 'img_i'
     elif (imageConversion == 'MagPhase'):
       (sitk_img_m, sitk_img_p) = self.realImagToMagPhase(firstVolume, secondVolume)
-      name_vol1 = 'debug_img_m'
-      name_vol2 = 'debug_img_p'
+      name_vol1 = 'img_m'
+      name_vol2 = 'img_p'
     else:                         # Conversion is None
       sitk_img_m = sitkUtils.PullVolumeFromSlicer(firstVolume)
       if (in_channels!=1):
@@ -2720,19 +2870,19 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # plane = self.getDirectionName(sitk_img_m)
     #TODO: Check getDirectionName function
 
-    # Push debug images to Slicer     
-    if debugFlag:
+    # Push images to Slicer     
+    if saveImgFlag:
       self.pushSitkToSlicerVolume(sitk_img_m, name_vol1)
-      self.saveSitkImage(sitk_img_m, name=name_vol1+'_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+      self.saveSitkImage(sitk_img_m, name=name_vol1+'_'+str(self.img_counter), path=image_path)
       if (in_channels!=1):
         self.pushSitkToSlicerVolume(sitk_img_p, name_vol2)
-        self.saveSitkImage(sitk_img_p, name=name_vol2+'_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+        self.saveSitkImage(sitk_img_p, name=name_vol2+'_'+str(self.img_counter), path=image_path)
       if in_channels == 3:
-        self.pushSitkToSlicerVolume(sitk_img_a, 'debug_img_a')
-        self.saveSitkImage(sitk_img_a, name='debug_img_a_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+        self.pushSitkToSlicerVolume(sitk_img_a, 'img_a')
+        self.saveSitkImage(sitk_img_a, name='img_a_'+str(self.img_counter), path=image_path)
       if sitk_mask is not None:
-        self.pushSitkToSlicerVolume(sitk_mask, 'debug_mask')
-        self.saveSitkImage(sitk_mask, name='debug_mask_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+        self.pushSitkToSlicerVolume(sitk_mask, 'mask')
+        self.saveSitkImage(sitk_mask, name='mask_'+str(self.img_counter), path=image_path)
 
     ######################################
     ##                                  ##
@@ -2770,10 +2920,10 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Evaluate model
     self.model.eval()
     with torch.no_grad():
-      batch_input = data['image'].unsqueeze(0)
-      val_inputs = batch_input.to(torch.device('cpu'))
-      val_outputs = sliding_window_inference(val_inputs, window_size, 1, self.model)
-      data['pred'] = val_outputs[0]
+      batch_input = data['image'].unsqueeze(0).to(self.device)   # [1, C, D, H, W]
+      val_outputs = sliding_window_inference(inputs=batch_input, roi_size=window_size, sw_batch_size=1, predictor=self.model)
+      logits = val_outputs[0].cpu()    # [C, D, H, W]
+      data["pred"] = MetaTensor(logits, meta=data["image"].meta.copy())
     # Apply post-transform
     data = self.post_transforms(data)
     sitk_output = data['pred']
@@ -2787,8 +2937,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     else:
       self.pushSitkToSlicerVolume(sitk_output, self.needleLabelMapNodes[0])
     
-    if debugFlag:
-      self.saveSitkImage(sitk_output, name='debug_labelmap_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+    if saveImgFlag:
+      self.saveSitkImage(sitk_output, name='img_labelmap_'+str(self.img_counter), path=image_path)
 
 
     ######################################
@@ -2797,9 +2947,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                  ##
     ######################################    
 
-    if debugFlag:
-      self.pushSitkToSlicerVolume(sitk_output, 'debug_output')
-      self.saveSitkImage(sitk_output, name='debug_output_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName))
+    if saveImgFlag:
+      self.pushSitkToSlicerVolume(sitk_output, 'img_output')
+      self.saveSitkImage(sitk_output, name='img_output_'+str(self.img_counter), path=image_path)
 
     # Apply mask to output (optional)
     if sitk_mask is not None:
@@ -2809,19 +2959,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     sitk_tip = (sitk_output==2)
     sitk_shaft = (sitk_output==1)
 
-    if debugFlag:
-      self.saveSitkImage(sitk_tip, name='debug_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
-      self.saveSitkImage(sitk_shaft, name='debug_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+    if saveImgFlag:
+      self.saveSitkImage(sitk_tip, name='img_shaft_'+str(self.img_counter), path=image_path)
+      self.saveSitkImage(sitk_shaft, name='img_shaft_'+str(self.img_counter), path=image_path)
 
     # Separate tip from segmentation
     (sitk_tip_components, tip_dict) = self.separateComponents(sitk_tip)
-    # if debugFlag:
-      # self.pushSitkToSlicerVolume(sitk_tip, 'debug_tip')
-    #  if tip_dict is not None:
-    #    for element in tip_dict:
-    #      print('Tip Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
-    #  else:
-    #    print('No tip segmentation')
+
 
     ######################################
     ##                                  ##
@@ -2834,14 +2978,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Separate shaft from segmentation
     (sitk_shaft_components, shaft_dict) = self.separateComponents(sitk_shaft)
     
-    # if debugFlag:
-      # self.pushSitkToSlicerVolume(sitk_shaft, 'debug_shaft')
-    #if logFlag:
-    #  if shaft_dict is not None:
-    #    for element in shaft_dict:
-    #      print('Shaft Label %s: -> Size: %s, Center: %s' %(element['label'], element['size'], element['centroid']))
-    #  else:
-    #    print('No shaft segmentation')    
 
     ######################################
     ##                                  ##
@@ -2865,9 +3001,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         shaft_size2 = shaft_dict[1]['size']
         if shaft_size2 >= minShaft:
           shaft_label2 = shaft_dict[1]['label']
-      if debugFlag:
-        self.saveSitkImage(sitk_selected_shaft, name='debug_selected_shaft_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
-        self.pushSitkToSlicerVolume(sitk_selected_shaft, 'debug_selected_shaft')
+      if saveImgFlag:
+        self.saveSitkImage(sitk_selected_shaft, name='img_selected_shaft_'+str(self.img_counter), path=image_path, is_label=True)
+        self.pushSitkToSlicerVolume(sitk_selected_shaft, 'img_selected_shaft')
     
     # Select largest tip
     if tip_dict is not None: 
@@ -2881,9 +3017,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         if tip_size2 >= minTip:
           tip_label2 = tip_dict[1]['label']
           tip_center2 = tip_dict[1]['centroid']
-      if debugFlag:
-        self.saveSitkImage(sitk_selected_tip, name='debug_selected_tip_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
-        self.pushSitkToSlicerVolume(sitk_selected_tip, 'debug_selected_tip')
+      if saveImgFlag:
+        self.saveSitkImage(sitk_selected_tip, name='img_selected_tip_'+str(self.img_counter), path=image_path, is_label=True)
+        self.pushSitkToSlicerVolume(sitk_selected_tip, 'img_selected_tip')
 
 
     # Check tip and shaft connection
@@ -2924,50 +3060,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
             tip_center = tip_center2
             tip_size = tip_size2
             sitk_selected_tip = sitk_selected_tip2
-            
-
-    priorityTip = True # NEVER DOING THIS BLOCK. Keeping the code as future option (priority on bigger connected shaft than bigger tip)
-    if priorityTip is False:
-      # Check tip and shaft connection
-      connected = False
-      if (shaft_label is not None) and (tip_label is not None):
-          connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft) # S1T1
-          if (connected is False):
-            if (tip_label2 is not None): #Tip1 not connected to shaft1 - Check Tip2
-              sitk_selected_tip2 = sitk.BinaryThreshold(sitk_tip_components, lowerThreshold=tip_label2, upperThreshold=tip_label2, insideValue=1, outsideValue=0)         
-              connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft) #S1T2
-              if connected is True: #Change selection to tip2
-                tip_label = tip_label2
-                tip_center = tip_center2
-                tip_size = tip_size2
-                sitk_selected_tip = sitk_selected_tip2
-              elif (shaft_label2 is not None): #Tip2 not connected to shaft1 - Check shaft2
-                sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
-                connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
-                if (connected is True): #Change selection to shaft2
-                  shaft_label = shaft_label2
-                  shaft_size = shaft_size2
-                  sitk_selected_shaft = sitk_selected_shaft2
-                elif (tip_label2 is not None): #Tip1 not connected to shaft2 - Check Tip2
-                  connected = self.checkIfAdjacent(sitk_selected_tip2, sitk_selected_shaft2) #S2T2
-                  if (connected is True): #Change selection to tip2 and shaft2
-                    tip_label = tip_label2
-                    tip_center = tip_center2
-                    tip_size = tip_size2
-                    sitk_selected_tip = sitk_selected_tip2
-                    shaft_label = shaft_label2
-                    shaft_size = shaft_size2
-                    sitk_selected_shaft = sitk_selected_shaft2                
-            elif (shaft_label2 is not None): #Tip1 not connected to shaft1 and NO Tip2 - Check shaft2
-              sitk_selected_shaft2 = sitk.BinaryThreshold(sitk_shaft_components, lowerThreshold=shaft_label2, upperThreshold=shaft_label2, insideValue=1, outsideValue=0)
-              connected = self.checkIfAdjacent(sitk_selected_tip, sitk_selected_shaft2) #S2T1
-              if (connected is True): #Change selection to shaft2
-                shaft_label = shaft_label2
-                shaft_size = shaft_size2
-                sitk_selected_shaft = sitk_selected_shaft2  
-            
-    #if logFlag:
-    #  print('SELECTED: tip = %s, shaft = %s, connected = %s ' %(tip_label, shaft_label, connected))  
 
     ######################################
     ##                                  ##
@@ -2993,6 +3085,24 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           # Does not update anything
         self.setTipMarkupColor(tipTracked=False)  
         self.tracker.mark('tip_tracked') # Consider no tip to be the tracked tip result
+
+        # CSV log (silent) before returning
+        if saveDataFlag:
+          try:
+            logger = getattr(self, 'csv_logger', None)
+            if logger is not None:
+              rec = ScanRecord.from_values(
+                image_number=self.img_counter,
+                plane_name=plane,
+                confidence_text=_conf_text_for_log,  # 'None'
+                segm_tip_ras=_segm_ras_for_log,      # None → NaNs in CSV
+                tracked_pre_ras=_pre_ras_for_log,    # None
+                tracked_post_ras=_post_ras_for_log,  # None
+              )
+              logger.log(rec)
+          except Exception:
+            pass
+
         return None  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
@@ -3023,8 +3133,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         confidence = 3  # MEDIUM LOW (big tip NOT connected)
       elif shaft_size >= minShaft:
         sitk_skeleton = sitk.BinaryThinning(sitk_selected_shaft)
-        if debugFlag:
-          self.saveSitkImage(sitk_skeleton, name='debug_skeleton_'+str(image_count), path=os.path.join(self.path, 'Debug', debugName), is_label=True)
+        if saveImgFlag:
+          self.saveSitkImage(sitk_skeleton, name='img_skeleton_'+str(self.img_counter), path=image_path, is_label=True)
         shaft_tip = self.getShaftTipCoordinates(sitk_skeleton)
         tip_center = shaft_tip          
         confidence = 2   # MEDIUM LOW (small tip, big shaft) - Use shaft tip
@@ -3039,10 +3149,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
 
     # Convert to 3D Slicer coordinates (RAS)
     centerRAS = [-tip_center[0], -tip_center[1], tip_center[2]]
+
     # # Plot
     if logFlag:
       #print('Segmented tip = %s' %centerRAS)
       print("Segmented tip = [%.4f, %.4f, %.4f]" % tuple(centerRAS))
+    
+    if saveDataFlag:
+      _segm_ras_for_log = tuple(centerRAS)
 
     # Push coordinates to tip Node
     segmTipMatrix = vtk.vtkMatrix4x4()
@@ -3088,13 +3202,14 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
           trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position
         self.prevDetection[2] = True
 
-
       # Smooth trackedTip (if enabled)
       proposed = [trackTipMatrix.GetElement(0,3), trackTipMatrix.GetElement(1,3),trackTipMatrix.GetElement(2,3)]
+      proposed_sm = self.smoothTip(proposed) # Smooth (only when we are actually updating the tracked tip)
+      if saveDataFlag:
+        _pre_ras_for_log = tuple(proposed)
+        _post_ras_for_log = tuple(proposed_sm)
       if logFlag:
         print("Tracked tip (no smoothing) = [%.4f, %.4f, %.4f]" % tuple(proposed))
-      proposed_sm = self.smoothTip(proposed) # Smooth (only when we are actually updating the tracked tip)
-      if logFlag:
         print("Tracked tip = [%.4f, %.4f, %.4f]" % tuple(proposed_sm))
 
       # Set new tip value
@@ -3109,6 +3224,27 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     # Push confidence to Node
     self.needleConfidenceNode.SetText(str(time.time()) + '; ' + self.getConfidenceText(confidence) + '; '+ str(confidence)) 
     self.tracker.mark('tip_tracked')
+
+    if saveDataFlag:
+      try:
+        _conf_text_for_log = self.getConfidenceText(confidence) or 'None'
+      except Exception:
+        _conf_text_for_log = 'None'
+      try:
+        logger = getattr(self, 'csv_logger', None)
+        if logger is not None:
+          rec = ScanRecord.from_values(
+            image_number=self.img_counter,
+            plane_name=plane,
+            confidence_text=_conf_text_for_log,
+            segm_tip_ras=_segm_ras_for_log,
+            tracked_pre_ras=_pre_ras_for_log,
+            tracked_post_ras=_post_ras_for_log,
+          )
+          logger.log(rec)
+      except Exception:
+        pass
+
     return confidence
   
   ############################################
