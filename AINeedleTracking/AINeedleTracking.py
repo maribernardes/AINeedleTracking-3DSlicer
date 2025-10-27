@@ -1689,6 +1689,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.updateButtons()
 
     # Store selected parameters
+    # TODO: Send as parameter dict to logic?
     self.inputMode = 'MagPhase' if self.inputModeMagPhase.checked else 'RealImag'
     self.inputVolume = 2 if self.inputVolume2D.checked else 3
     self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
@@ -1715,7 +1716,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.secondVolumePlane2 = self.secondVolumePlane2Selector.currentNode() 
     self.segmentationNodePlane2 = self.segmentationMaskPlane2Selector.currentNode()
 
-    # TODO: Send as parameter to logic?
+    # TODO: Send as parameter dict to logic?
     self.logic.smoothingEnabled = self.smoothTipCheckBox.checked
     self.logic.smoothingMethod = 'EMA' if self.smoothingMethodCombo.currentIndex==0 else 'Kalman'
     self.logic.emaAlpha = float(self.emaAlphaSlider.value)
@@ -1749,7 +1750,6 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     print('____________________')
 
     # Initialize CSV logger (silent) if saving data
-
     # Ensure output folder exists when saving images or data
     if self.saveImgFlag or self.saveDataFlag:
       path = os.path.dirname(os.path.abspath(__file__))
@@ -1769,16 +1769,28 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     if self.saveDataFlag:
       ts = time.strftime('%Y%m%d_%H%M%S')
-      csv_path = os.path.join(folder_path, f'session_id_{ts}.csv')
+      csv_path = os.path.join(folder_path, f'session_{ts}.csv')
       try:
         self.logic.csv_logger = ScanCSVLogger(csv_path, append=False)
       except Exception as e:
         # keep silent for runtime; only warn in console
         print(f'WARNING: could not create CSV logger: {e}')
 
+      # Initialize the point list for the tracked trajectory
+      if self.saveName:
+        trajName = 'Traj_' + self.saveName + '_'  
+      else:
+        trajName = 'Traj_'
+      self.logic.trackedTrajectoryNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", trajName+ts)
+      self.logic.trackedTrajectoryNode.CreateDefaultDisplayNodes()
+      dn = self.logic.trackedTrajectoryNode.GetDisplayNode()
+      if dn:
+        dn.SetGlyphScale(1.5)               # optional: larger dots
+        dn.SetSelectedColor(1.0, 0.2, 0.1)  # optional: reddish
+        dn.SetTextScale(0.0)                # optional: hide labels by default
+
       # Collect GUI/parameter constants (adjust names if yours differ)
       session_meta = {
-        #"session_id": self.logic.session_id,
         "timestamp_start": ts,
         "save_name": self.saveName,                # shared for images & data
         "saving_images": bool(self.saveImgFlag),
@@ -1814,7 +1826,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         },
       }
       # Persist JSON next to the CSV
-      self.logic.session_meta_path = os.path.join(folder_path, f"session_meta_{ts}.json")
+      self.logic.session_meta_path = os.path.join(folder_path, f"session_{ts}.json")
       try:
         with open(self.logic.session_meta_path, "w", encoding="utf-8") as f:
           json.dump(session_meta, f, indent=2)
@@ -1873,7 +1885,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         with open(self.logic.session_meta_path, "r", encoding="utf-8") as f:
           session_meta = json.load(f)
         session_meta["timestamp_end"] = time.strftime('%Y%m%d_%H%M%S')
-        session_meta["total_scans"] = int(getattr(self, "img_counter", 0))
+        session_meta["total_scans"] = self.logic.img_counter
         with open(self.logic.session_meta_path, "w", encoding="utf-8") as f:
           json.dump(session_meta, f, indent=2)
     except Exception as e:
@@ -2421,6 +2433,13 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     principal_direction = eigenvectors[:, 0]
     return principal_direction
   
+  def getSitkCenterCoordinates(self, sitk_img):
+    size = sitk_img.GetSize()
+    # Calculate the center in index space
+    center_index = [(s - 1) / 2.0 for s in size]
+    # Transform the continuous index (float) to a physical point
+    return sitk_img.TransformContinuousIndexToPhysicalPoint(center_index)
+
   # Return sitk Image from numpy array
   def numpyToitk(self, array, sitkReference, type=None):
     image = sitk.GetImageFromArray(array, isVector=False)
@@ -3171,11 +3190,6 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     ##                                ##
     ####################################
 
-    #if sitk_img_m.GetDepth()>1 or : # Update slice coordinates if first estimate or if 3D
-    #  updateSlice = True
-    #else:
-    #  updateSlice = False
-
     if (confidence >= confidenceLevel): 
       # Get current tip transform
       trackTipMatrix = vtk.vtkMatrix4x4()
@@ -3185,21 +3199,30 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
         trackTipMatrix.SetElement(0,3, centerRAS[0])
         trackTipMatrix.SetElement(2,3, centerRAS[2])
         if not (self.prevDetection[1] is True or self.prevDetection[2] is True): # No tip in other planes
-          trackTipMatrix.SetElement(1,3, centerRAS[1])                 # Update COR slice position
+          slice_thickness = sitk_img_m.GetSpacing()[2]
+          center = self.getSitkCenterCoordinates(sitk_img_m)
+          if abs(center[1]-centerRAS[1]) >= 0.5*slice_thickness:
+            trackTipMatrix.SetElement(1,3, centerRAS[1])                 # Update COR slice position if slice changed
         self.prevDetection[0] = True
       elif plane == 'SAG':
       # Update tracked tip A/P and I/S coordinates
         trackTipMatrix.SetElement(1,3, centerRAS[1])
         trackTipMatrix.SetElement(2,3, centerRAS[2])      
         if not (self.prevDetection[0] is True or self.prevDetection[2] is True): # No tip in other planes
-          trackTipMatrix.SetElement(0,3, centerRAS[0])                  # Update SAG slice position
+          slice_thickness = sitk_img_m.GetSpacing()[2]
+          center = self.getSitkCenterCoordinates(sitk_img_m)
+          if abs(center[0]-centerRAS[0]) >= 0.5*slice_thickness:
+            trackTipMatrix.SetElement(0,3, centerRAS[0])                  # Update SAG slice position if slice changed
         self.prevDetection[1] = True
       elif plane == 'AX':
       # Update tracked tip L/R and A/P coordinates
         trackTipMatrix.SetElement(0,3, centerRAS[0])
         trackTipMatrix.SetElement(1,3, centerRAS[1])      
         if not (self.prevDetection[0] is True or self.prevDetection[1] is True): # No tip in other planes
-          trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position
+          slice_thickness = sitk_img_m.GetSpacing()[2]
+          center = self.getSitkCenterCoordinates(sitk_img_m)
+          if abs(center[2]-centerRAS[2]) >= 0.5*slice_thickness:
+            trackTipMatrix.SetElement(2,3, centerRAS[2])                  # Update AX slice position if slice changed
         self.prevDetection[2] = True
 
       # Smooth trackedTip (if enabled)
@@ -3208,6 +3231,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       if saveDataFlag:
         _pre_ras_for_log = tuple(proposed)
         _post_ras_for_log = tuple(proposed_sm)
+        self.trackedTrajectoryNode.AddControlPoint([proposed_sm[0], proposed_sm[1], proposed_sm[2]], plane+'_'+str(self.img_counter))
       if logFlag:
         print("Tracked tip (no smoothing) = [%.4f, %.4f, %.4f]" % tuple(proposed))
         print("Tracked tip = [%.4f, %.4f, %.4f]" % tuple(proposed_sm))
