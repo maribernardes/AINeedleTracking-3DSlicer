@@ -931,7 +931,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.minShaftSizeWidget.singleStep = 5
     self.minShaftSizeWidget.minimum = 5
     self.minShaftSizeWidget.maximum = 50
-    self.minShaftSizeWidget.value = 20
+    self.minShaftSizeWidget.value = 5
     self.minShaftSizeWidget.setToolTip("Set minimum shaft size (px) for accepting segmentation")
     advancedFormLayout.addRow("Minimum shaft size ", self.minShaftSizeWidget)
 
