@@ -14,7 +14,8 @@ slicer.util.pip_install("torch torchvision torchaudio --index-url https://downlo
 
 Then, install the following python packages to 3D Slicer (use 3D Slicer Python Interactor):
 ```
-slicer.util.pip_install('monai[all]')
+slicer.util.pip_install('monai')
+slicer.util.pip_install('nibabel')
 slicer.util.pip_install('scikit-image')
 ```
 
