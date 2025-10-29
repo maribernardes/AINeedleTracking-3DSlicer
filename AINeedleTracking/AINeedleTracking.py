@@ -1806,6 +1806,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         # Tracking / algorithm settings
         "window_size": self.windowSize,
         "min_tip_size": self.minTipSize,
+        "min_shaft_size": self.minShaftSize,
         "confidence_threshold": self.confidenceLevel,   # numeric threshold used in getNeedle
         "confidence_level": confidenceText,             # text descriptor
         "smoothing": smoothingMethod,
