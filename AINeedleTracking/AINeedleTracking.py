@@ -241,6 +241,11 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Set validator for floating points
     regex = qt.QRegularExpression(r"^-?[0-9]*\.?[0-9]*$")# Regular expression for numbers and dots (e.g., 123.45)
     self.floatValidator = qt.QRegularExpressionValidator(regex)
+
+    # Regex: 1–3 comma-separated tokens, each COR|SAG|AX, no duplicates enforced here
+    pattern = r'^(?:COR|SAG|AX)(?:,(?:COR|SAG|AX)){0,2}$'
+    self.orderValidator = qt.QRegularExpressionValidator(qt.QRegularExpression(pattern))
+
     self.path = os.path.dirname(os.path.abspath(__file__))
 
     ## Model                
@@ -897,7 +902,17 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     advancedFormLayout.addRow(saveHBoxLayout)    
 
     # Preprocessing options for the images
-    preprocessingHBoxLayout = qt.QHBoxLayout()   
+    preprocessingHBoxLayout = qt.QHBoxLayout()    
+    self.orderTextbox = qt.QLineEdit()
+    self.saveNameTextbox.setFixedWidth(200)
+    self.orderTextbox.setPlaceholderText("e.g., COR,SAG or AX,SAG,COR")
+    self.orderTextbox.setToolTip("Comma-separated plane order using COR, SAG, AX")
+    self.orderTextbox.setValidator(self.orderValidator)
+    self.orderTextbox.setText('COR,SAG,AX')
+    preprocessingHBoxLayout.addWidget(qt.QLabel("Scans order:"))
+    preprocessingHBoxLayout.addWidget(self.orderTextbox)
+    preprocessingHBoxLayout.addStretch()  
+    
     phaseUnwrapLabel = qt.QLabel('Phase unwrap')
     phaseUnwrapLabel.setFixedWidth(85)
     self.phaseUnwrapCheckBox = qt.QCheckBox()
@@ -996,6 +1011,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.saveDataFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.saveImgFlagCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.saveNameTextbox.connect("textChanged", self.updateParameterNodeFromGUI)
+    self.orderTextbox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.phaseUnwrapCheckBox.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.windowSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
     self.minTipSizeWidget.connect("valueChanged(double)", self.updateParameterNodeFromGUI)
@@ -1203,15 +1219,13 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.segmentationMaskPlane2Selector.setCurrentNode(self._parameterNode.GetNodeReference('MaskPlane2'))
 
     self.pushTipToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTipToRobot') == 'True')
-    #self.pushTargetToRobotCheckBox.checked = (self._parameterNode.GetParameter('PushTargetToRobot') == 'True')
-    #self.transformSelector.setCurrentNode(self._parameterNode.GetNodeReference('zFrame'))
-    #self.targetSelector.setCurrentNode(self._parameterNode.GetNodeReference('Target'))
     self.robotConnectionSelector.setCurrentNode(self._parameterNode.GetNodeReference('RobotIGTLClient'))
     
     self.logFlagCheckBox.checked = (self._parameterNode.GetParameter('ScreenLog') == 'True')
     self.saveDataFlagCheckBox.checked = (self._parameterNode.GetParameter('SaveData') == 'True')
     self.saveImgFlagCheckBox.checked = (self._parameterNode.GetParameter('SaveImg') == 'True')
     self.saveNameTextbox.setText(self._parameterNode.GetParameter('SaveName'))
+    self.orderTextbox.setText(self._parameterNode.GetParameter('OrderScans'))
     self.phaseUnwrapCheckBox.checked = (self._parameterNode.GetParameter('PhaseUnwrap') == 'True')
     self.windowSizeWidget.value = float(self._parameterNode.GetParameter('WindowSize'))
     self.minTipSizeWidget.value = float(self._parameterNode.GetParameter('MinTipSize'))
@@ -1275,6 +1289,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._parameterNode.SetParameter('SaveData', 'True' if self.saveDataFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('SaveImg', 'True' if self.saveImgFlagCheckBox.checked else 'False')
     self._parameterNode.SetParameter('SaveName', self.saveNameTextbox.text.strip())    
+    self._parameterNode.SetParameter('OrderScans', self.orderTextbox.text.strip())
     self._parameterNode.SetParameter('PhaseUnwrap', 'True' if self.phaseUnwrapCheckBox.checked else 'False')
     self._parameterNode.SetParameter('WindowSize', str(self.windowSizeWidget.value))
     self._parameterNode.SetParameter('MinTipSize', str(self.minTipSizeWidget.value))
@@ -1683,6 +1698,57 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     centerRAS = (m.GetElement(0,3), m.GetElement(1,3), m.GetElement(2,3))
     return centerRAS
 
+  # Get order vector from the text input
+  def getOrderVector(self):
+    text = self.orderTextbox.text.strip()
+    # Split into tokens after validation
+    return [t for t in text.split(',') if t]
+  
+  # Create observers and process initial scans in the order specified by 'orderVector',
+  # where items are any of {'COR','SAG','AX'}.
+  def initializeScans(self):
+    orderVector = self.getOrderVector()
+    # Map plane name -> index
+    idx_map = {'COR': 0, 'SAG': 1, 'AX': 2}
+    # Validate vector; ignore unknown entries gracefully
+    for plane_name in orderVector:
+      if plane_name not in idx_map:
+          continue  # or raise if you prefer strictness
+      i = idx_map[plane_name]
+      # Skip if this plane is disabled
+      if not self.useScanPlanes[i]:
+          continue
+      # Fetch per-plane nodes/callbacks by index
+      firstVol  = getattr(self, f'firstVolumePlane{i}')
+      secondVol = getattr(self, f'secondVolumePlane{i}')
+      segNode   = getattr(self, f'segmentationNodePlane{i}')
+      cb        = getattr(self, f'receivedImagePlane{i}')
+      # Mark + run your existing getNeedle()
+      self.tracker.mark('image_received')
+      self.getNeedle(plane_name, firstVol, secondVol, segNode)
+      # Decide which volume to observe based on channels
+      volToObserve = firstVol if self.inputChannels == 1 else secondVol
+      self.addOrReplaceObserver(volToObserve, cb)
+        
+  # Ensure we have at most one observer per (volumeNode, callback).
+  # Stores the tag on self using a stable attribute name derived from the callback.
+  def addOrReplaceObserver(self, volumeNode, callback):
+    # Build a stable attribute name to store the observer tag
+    tag_attr = f'_obsTag__{callback.__name__}'
+    # Remove previous observer (if any) from any prior volume
+    old = getattr(self, tag_attr, None)
+    if old is not None:
+      try:
+        # old is (nodeRef, tagId)
+        old_node, old_tag = old
+        if old_node is not None and old_tag is not None:
+            old_node.RemoveObserver(old_tag)
+      except Exception:
+        pass
+    # Add new observer and remember it
+    tag_id = self.addObserver(volumeNode, volumeNode.ImageDataModifiedEvent, callback)
+    setattr(self, tag_attr, (volumeNode, tag_id))
+
   def startTracking(self):
     print('UI: startTracking()')
     self.isTrackingOn = True
@@ -1843,31 +1909,30 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
     self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.modelName)
-    
+    self.initializeScans()
     # Create listener to image sequence node (considering phase image comes after magnitude)
-    if self.useScanPlanes[0] is True:
-      self.tracker.mark('image_received')
-      self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0, self.segmentationNodePlane0) 
-      if self.inputChannels==1:
-        self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
-      else:
-        self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
-    if self.useScanPlanes[1] is True:
-      self.tracker.mark('image_received')
-      self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1, self.segmentationNodePlane1) 
-      if self.inputChannels==1:
-        self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
-      else:
-        self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
-    if self.useScanPlanes[2] is True:
-      self.tracker.mark('image_received')
-      self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2, self.segmentationNodePlane2) 
-      if self.inputChannels==1:
-        self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
-      else:
-        self.addObserver(self.secondVolumePlane2, self.secondVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+  #  if self.useScanPlanes[0] is True:
+  #    self.tracker.mark('image_received')
+  #    self.getNeedle('COR', self.firstVolumePlane0, self.secondVolumePlane0, self.segmentationNodePlane0) 
+  #    if self.inputChannels==1:
+  #      self.addObserver(self.firstVolumePlane0, self.firstVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+  #    else:
+  #      self.addObserver(self.secondVolumePlane0, self.secondVolumePlane0.ImageDataModifiedEvent, self.receivedImagePlane0)
+  #  if self.useScanPlanes[1] is True:
+  #    self.tracker.mark('image_received')
+  #    self.getNeedle('SAG', self.firstVolumePlane1, self.secondVolumePlane1, self.segmentationNodePlane1) 
+  #    if self.inputChannels==1:
+  #      self.addObserver(self.firstVolumePlane1, self.firstVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
+  #    else:
+  #      self.addObserver(self.secondVolumePlane1, self.secondVolumePlane1.ImageDataModifiedEvent, self.receivedImagePlane1)
+  #  if self.useScanPlanes[2] is True:
+  #    self.tracker.mark('image_received')
+  #    self.getNeedle('AX', self.firstVolumePlane2, self.secondVolumePlane2, self.segmentationNodePlane2) 
+  #    if self.inputChannels==1:
+  #      self.addObserver(self.firstVolumePlane2, self.firstVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
+  #    else:
+  #      self.addObserver(self.secondVolumePlane2, self.secondVolumePlane2.ImageDataModifiedEvent, self.receivedImagePlane2)
 
-  
   def stopTracking(self):
     self.isTrackingOn = False
     self.updateButtons()
@@ -2229,6 +2294,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('SaveImg', 'False') 
     if not parameterNode.GetParameter('SaveName'): 
       parameterNode.SetParameter('SaveName', '')
+    if not parameterNode.GetParameter('OrderScans'): 
+      parameterNode.SetParameter('OrderScans', 'COR,SAG,AX')
     if not parameterNode.GetParameter('WindowSize'):
       parameterNode.SetParameter('WindowSize', '84') 
     if not parameterNode.GetParameter('MinTipSize'):
@@ -2565,8 +2632,11 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     if inputVolume == '2':
       pixel_dim = (3.6, 1.171875, 1.171875)
       #pixel_dim = (6, 1.171875, 1.171875)
+      print('Using 2D model pixel dim:', pixel_dim)
     else:
       pixel_dim = (3.6, 1.171875, 1.171875)
+      #pixel_dim = (6, 1.171875, 1.171875)
+      print('Using 3D model pixel dim:', pixel_dim)
     # Define pre-inference transforms
     if in_channels==2:
       pre_array = [
