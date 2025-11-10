@@ -2605,6 +2605,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       out_channels=out_channels,
       channels=[16, 32, 64, 128], 
       strides=[(1, 2, 2), (1, 2, 2), (1, lastStride, lastStride)], 
+      kernel_size=(1, 3, 3),           
+      up_kernel_size=(1, 3, 3),       
       num_res_units=resUnits,
       norm=unet_norm,
     )
