@@ -303,9 +303,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.resUnits2 = qt.QRadioButton('2')
     self.resUnits3 = qt.QRadioButton('3')
     self.resUnits2.checked = 1
-    self.lastStrideButtonGroup = qt.QButtonGroup()
-    self.lastStrideButtonGroup.addButton(self.resUnits2)
-    self.lastStrideButtonGroup.addButton(self.resUnits3)    
+    self.resUnitsButtonGroup = qt.QButtonGroup()
+    self.resUnitsButtonGroup.addButton(self.resUnits2)
+    self.resUnitsButtonGroup.addButton(self.resUnits3)    
     modelHBoxLayout.addWidget(self.resUnits2)
     modelHBoxLayout.addWidget(self.resUnits3)
     modelHBoxLayout.addStretch(1)
@@ -319,6 +319,17 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.lastStrideButtonGroup.addButton(self.lastStride2)    
     modelHBoxLayout.addWidget(self.lastStride1)
     modelHBoxLayout.addWidget(self.lastStride2)
+    modelHBoxLayout.addStretch(1)
+    
+    modelHBoxLayout.addWidget(qt.QLabel('Kernel size:'))
+    self.kernelSize1 = qt.QRadioButton('(1,3,3)')
+    self.kernelSize3 = qt.QRadioButton('(3,3,3)')
+    self.kernelSize3.checked = 1
+    self.kernelSizeButtonGroup = qt.QButtonGroup()
+    self.kernelSizeButtonGroup.addButton(self.kernelSize1)
+    self.kernelSizeButtonGroup.addButton(self.kernelSize3)    
+    modelHBoxLayout.addWidget(self.kernelSize1)
+    modelHBoxLayout.addWidget(self.kernelSize3)    
 
     setupFormLayout.addRow(modelHBoxLayout)
 
@@ -977,6 +988,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.resUnits3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.lastStride1.connect("toggled(bool)", self.updateParameterNodeFromGUI)
     self.lastStride2.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.kernelSize1.connect("toggled(bool)", self.updateParameterNodeFromGUI)
+    self.kernelSize3.connect("toggled(bool)", self.updateParameterNodeFromGUI)
 
     self.modelFileSelector.connect('currentIndexChanged(int)', self.updateParameterNodeFromGUI)
 
@@ -1031,7 +1044,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.resUnits3.connect("toggled(bool)", self.updateModelList)
     self.lastStride1.connect("toggled(bool)", self.updateModelList)    
     self.lastStride2.connect("toggled(bool)", self.updateModelList)
-
+    self.kernelSize1.connect("toggled(bool)", self.updateModelList)    
+    self.kernelSize3.connect("toggled(bool)", self.updateModelList)
+    
     self.usePlane0CheckBox.connect("toggled(bool)", self.updateButtons)
     self.usePlane1CheckBox.connect("toggled(bool)", self.updateButtons)
     self.usePlane2CheckBox.connect("toggled(bool)", self.updateButtons)
@@ -1189,6 +1204,8 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.resUnits3.checked = (self._parameterNode.GetParameter('ResUnits') == '3')
     self.lastStride1.checked = (self._parameterNode.GetParameter('LastStride') == '1')
     self.lastStride2.checked = (self._parameterNode.GetParameter('LastStride') == '2')
+    self.kernelSize1.checked = (self._parameterNode.GetParameter('KernelSize') == '1')
+    self.kernelSize3.checked = (self._parameterNode.GetParameter('KernelSize') == '3')
 
     self.modelFileSelector.setCurrentIndex(int(self._parameterNode.GetParameter('Model')))
 
@@ -1249,6 +1266,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     
     self._parameterNode.SetParameter('ResUnits', '2' if self.resUnits2.checked else '3')
     self._parameterNode.SetParameter('LastStride', '1' if self.lastStride1.checked else '2')
+    self._parameterNode.SetParameter('KernelSize', '1' if self.kernelSize1.checked else '3')
 
     self._parameterNode.SetParameter('Model', str(self.modelFileSelector.currentIndex))
 
@@ -1346,7 +1364,9 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.resUnits3.enabled = not self.isTrackingOn
     self.lastStride1.enabled = not self.isTrackingOn
     self.lastStride2.enabled = not self.isTrackingOn
-
+    self.kernelSize1.enabled = not self.isTrackingOn
+    self.kernelSize3.enabled = not self.isTrackingOn
+    
     self.modelFileSelector.enabled = not self.isTrackingOn
     self.scannerModeMagPhase.enabled = not self.isTrackingOn
     self.scannerModeRealImag.enabled = not self.isTrackingOn
@@ -1645,7 +1665,10 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       lastStride = '2'
     else:
       lastStride = '1'
-
+    if self.kernelSize1.checked:
+      kernelSize = '1'
+    else:
+      kernelSize = '3'
     listPath = os.path.join(self.path, 'Models', inputMode, volume+'D-'+channels+'CH','Conv'+resUnits, 'S'+lastStride)
     # Check if the folder exists
     if os.path.exists(listPath) and os.path.isdir(listPath):
@@ -1761,6 +1784,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.inputChannels = 1 if self.inputChannels1.checked else 2 if self.inputChannels2.checked else 3
     self.resUnits = 2 if self.resUnits2.checked else 3 
     self.lastStride = 1 if self.lastStride1.checked else 2 
+    self.kernelSize = 1 if self.kernelSize1.checked else 3 
     self.modelName = self.modelFileSelector.currentText
 
     self.scannerMode = 'MagPhase' if self.scannerModeMagPhase.checked else 'RealImag'
@@ -1799,7 +1823,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.minShaftSize = int(self.minShaftSizeWidget.value)
 
     print('Model = %s' %(self.modelName))
-    print('inMode = %s, inVolume = %s, inChannels = %s, resUnits = %s, lastStride = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride))
+    print('inMode = %s, inVolume = %s, inChannels = %s, resUnits = %s, lastStride = %s, kernelSize = %s' %(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.kernelSize))
     print('Tracking with confidence = %s' %confidenceText)
     print('windowSize = %s, minTipSize = %s, minShaft = %s' %(self.windowSize, self.minTipSize, self.minShaftSize))
     if self.logic.smoothingEnabled:
@@ -1869,6 +1893,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         "inChannels": self.inputChannels,
         "resUnits": self.resUnits,
         "lastStride": self.lastStride,
+        "kernelSize": self.kernelSize,
         # Tracking / algorithm settings
         "window_size": self.windowSize,
         "min_tip_size": self.minTipSize,
@@ -1908,7 +1933,7 @@ class AINeedleTrackingWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     # Initialize tracking logic
     self.logic.initializeTracking(self.useScanPlanes)
-    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.modelName)
+    self.logic.initializeModel(self.inputMode, self.inputVolume, self.inputChannels, self.resUnits, self.lastStride, self.kernelSize, self.modelName)
     self.initializeScans()
     # Create listener to image sequence node (considering phase image comes after magnitude)
   #  if self.useScanPlanes[0] is True:
@@ -2245,7 +2270,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       parameterNode.SetParameter('ResUnits', '2')     
     if not parameterNode.GetParameter('LastStride'):
       parameterNode.SetParameter('LastStride', '1')     
-
+    if not parameterNode.GetParameter('KernelSize'):
+      parameterNode.SetParameter('KernelSize', '3')
+           
     if not parameterNode.GetParameter('Model'): 
       parameterNode.SetParameter('Model', '0')    # Index of selected option
 
@@ -2580,7 +2607,7 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     return sitk.Cast(sitk_mask, sitk.sitkUInt8)
 
   # Setup UNet model
-  def setupUNet(self, inputVolume, in_channels, resUnits, lastStride, model, out_channels=3, norm='BATCH'):
+  def setupUNet(self, inputVolume, in_channels, resUnits, lastStride, kernel_size, model, out_channels=3, norm='BATCH'):
     print('Loading UNet ')
     if norm == 'INSTANCE':
       # Enable affine so N.weight/N.bias exist and can load
@@ -2605,8 +2632,8 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
       out_channels=out_channels,
       channels=[16, 32, 64, 128], 
       strides=[(1, 2, 2), (1, 2, 2), (1, lastStride, lastStride)], 
-      kernel_size=(1, 3, 3),           
-      up_kernel_size=(1, 3, 3),       
+      kernel_size=(kernel_size, 3, 3),           
+      up_kernel_size=(kernel_size, 3, 3),       
       num_res_units=resUnits,
       norm=unet_norm,
     )
@@ -2702,9 +2729,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
     self._last_update_ts = None
 
   # Initialize AI model
-  def initializeModel(self, inputMode, inputVolume, in_channels, resUnits, lastStride, modelName):
+  def initializeModel(self, inputMode, inputVolume, in_channels, resUnits, lastStride, kernelSize, modelName):
     modelFilePath = os.path.join(self.path,'Models',inputMode,str(inputVolume)+'D-'+str(in_channels)+'CH','Conv'+str(resUnits),'S'+str(lastStride),modelName)
-    self.setupUNet(inputVolume, in_channels, resUnits, lastStride, modelFilePath, norm='INSTANCE') # Setup UNet
+    self.setupUNet(inputVolume, in_channels, resUnits, lastStride, kernelSize, modelFilePath, norm='INSTANCE') # Setup UNet
 
   # Initialize masks
   def initializeMasks(self, segmentationNodePlane0, firstVolumePlane0, segmentationNodePlane1, firstVolumePlane1, segmentationNodePlane2, firstVolumePlane2):
