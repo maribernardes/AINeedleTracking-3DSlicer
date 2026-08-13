@@ -3221,7 +3221,9 @@ class AINeedleTrackingLogic(ScriptedLoadableModuleLogic):
               logger.log(rec)
           except Exception:
             pass
-
+        self.needleConfidenceNode.SetText(
+            str(time.time()) + '; None; 0'
+        )
         return None  # NONE (no tip, no shaft)
       # NO TIP WITH SHAFT
       else:
