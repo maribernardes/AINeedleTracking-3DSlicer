@@ -3,6 +3,18 @@
 ## Installation:
 First, install the appropriate torch version in 3DSlicer.
 
+### MacOS (Apple Silicon)
+
+For Slicer 5.10 type in the Python Interactor:
+
+```
+slicer.util.pip_install("numpy<2.0.0 torch==2.2.2 torchvision==0.17.2 monai==1.4.0 --upgrade --force-reinstall")
+slicer.util.pip_install('nibabel')
+slicer.util.pip_install('scikit-image')
+```
+
+### Linux
+
 Use the PyTorch Utils module (https://github.com/fepegar/SlicerPyTorch)
 
 OR
